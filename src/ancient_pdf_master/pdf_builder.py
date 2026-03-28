@@ -85,6 +85,8 @@ def build_searchable_pdf(
     output_path: str | Path,
     dpi: int = 300,
     progress_callback=None,
+    page_label_ranges=None,
+    toc_entries=None,
 ) -> Path:
     """Build a searchable PDF by overlaying invisible OCR text on scanned images.
 
@@ -94,6 +96,8 @@ def build_searchable_pdf(
         output_path: Where to save the final PDF.
         dpi: Resolution of the source images.
         progress_callback: Optional callable(page_num, total_pages) for progress.
+        page_label_ranges: Optional list of PageLabelRange for page numbering.
+        toc_entries: Optional list of TocEntry for PDF bookmarks.
 
     Returns:
         Path to the output file.
@@ -155,6 +159,16 @@ def build_searchable_pdf(
 
         if progress_callback:
             progress_callback(i + 1, len(images))
+
+    # Apply page labels (Roman numerals, Arabic, etc.)
+    if page_label_ranges:
+        from .page_labels import apply_page_labels
+        apply_page_labels(output_pdf, page_label_ranges)
+
+    # Embed TOC as PDF bookmarks
+    if toc_entries:
+        from .toc_builder import embed_toc
+        embed_toc(output_pdf, toc_entries)
 
     output_pdf.save(str(output_path))
     return output_path
