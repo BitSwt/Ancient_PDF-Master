@@ -80,35 +80,69 @@ VENV_DIR="$PROJECT_DIR/.venv"
 if [ ! -d "$VENV_DIR" ]; then
   echo "  Creating virtual environment..."
   python3 -m venv "$VENV_DIR"
+  if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to create virtual environment."
+    echo "Try: brew install python3"
+    exit 1
+  fi
 fi
 
 source "$VENV_DIR/bin/activate"
-pip install -e . --quiet 2>&1
+
+echo "  Upgrading pip..."
+pip install --upgrade pip setuptools wheel --quiet 2>&1 || {
+  echo "WARNING: pip upgrade failed, continuing with existing version..."
+}
+
+echo "  Installing Python packages..."
+if ! pip install -e . --quiet 2>&1; then
+  echo ""
+  echo "ERROR: pip install failed."
+  echo ""
+  echo "Common fixes:"
+  echo "  1. Upgrade pip:   $VENV_DIR/bin/pip install --upgrade pip"
+  echo "  2. Install qpdf:  brew install qpdf   (needed if pikepdf build fails)"
+  echo "  3. Retry:         $VENV_DIR/bin/pip install -e ."
+  echo ""
+  echo "If the error persists, try installing dependencies individually:"
+  echo "  $VENV_DIR/bin/pip install pytesseract Pillow pdf2image pikepdf reportlab"
+  exit 1
+fi
 echo "  [OK] Python packages installed (venv: .venv)"
 echo ""
 
 # ── 3. Install Node.js dependencies ──
 echo "[3/5] Installing Node.js dependencies..."
-npm install 2>&1 | tail -3
+if ! npm install 2>&1 | tail -5; then
+  echo "ERROR: npm install failed."
+  echo "Try: rm -rf node_modules && npm install"
+  exit 1
+fi
 echo "  [OK] Node.js packages installed"
 echo ""
 
 # ── 4. Build .app bundle ──
 echo "[4/5] Building .app bundle..."
 # --config.mac.identity=null skips code signing for local install
-npx electron-builder --mac dir --config.mac.identity=null 2>&1 | tail -5
-echo ""
+if ! npx electron-builder --mac dir --config.mac.identity=null 2>&1 | tail -5; then
+  echo ""
+  echo "WARNING: .app build failed. You can still run in dev mode: npm start"
+  echo ""
+fi
 
 # ── 5. Copy to /Applications ──
 APP_NAME="Ancient PDF Master"
 APP_SRC=$(find dist -name "*.app" -maxdepth 3 -type d 2>/dev/null | head -1)
 
 if [ -z "$APP_SRC" ]; then
-  echo "ERROR: .app bundle not found in dist/"
+  echo "WARNING: .app bundle not found in dist/"
   echo ""
-  echo "You can still run in development mode:"
+  echo "You can run in development mode instead:"
   echo "  npm start"
-  exit 1
+  echo ""
+  echo "Or retry the build:"
+  echo "  npx electron-builder --mac dir --config.mac.identity=null"
+  exit 0
 fi
 
 echo "[5/5] Installing to /Applications..."
