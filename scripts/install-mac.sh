@@ -34,12 +34,27 @@ if [ "$NODE_VERSION" -lt 18 ]; then
 fi
 echo "  [OK] Node.js $(node -v)"
 
-# Check Python 3
-if ! command -v python3 &>/dev/null; then
+# Check Python 3 — prefer Homebrew Python over Xcode bundled Python
+# Xcode Python has pip 21.x which can't do pyproject.toml editable installs
+PYTHON3=""
+BREW_PYTHON="$(brew --prefix)/bin/python3"
+if [ -x "$BREW_PYTHON" ]; then
+  PYTHON3="$BREW_PYTHON"
+elif command -v python3 &>/dev/null; then
+  PY_PATH="$(which python3)"
+  if [[ "$PY_PATH" == *"Xcode"* || "$PY_PATH" == *"CommandLineTools"* ]]; then
+    echo "  Xcode Python detected ($PY_PATH) — installing Homebrew Python..."
+    brew install python3
+    PYTHON3="$(brew --prefix)/bin/python3"
+  else
+    PYTHON3="python3"
+  fi
+else
   echo "Installing Python 3..."
   brew install python3
+  PYTHON3="$(brew --prefix)/bin/python3"
 fi
-echo "  [OK] Python $(python3 --version)"
+echo "  [OK] Python $($PYTHON3 --version)"
 
 # Check Tesseract
 if ! command -v tesseract &>/dev/null; then
@@ -78,8 +93,8 @@ echo "[2/5] Installing Python backend..."
 VENV_DIR="$PROJECT_DIR/.venv"
 
 if [ ! -d "$VENV_DIR" ]; then
-  echo "  Creating virtual environment..."
-  python3 -m venv "$VENV_DIR"
+  echo "  Creating virtual environment with $PYTHON3..."
+  "$PYTHON3" -m venv "$VENV_DIR"
   if [ $? -ne 0 ]; then
     echo "ERROR: Failed to create virtual environment."
     echo "Try: brew install python3"

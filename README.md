@@ -50,7 +50,9 @@ git clone https://github.com/bitswt/Ancient_PDF-Master.git
 cd Ancient_PDF-Master
 
 # Python 가상환경 (필수 - venv 없이 pip install하면 PEP 668 에러 발생)
-python3 -m venv .venv
+# ⚠️ Homebrew Python 필요 (Xcode Python은 pip이 너무 오래되어 설치 실패)
+#    brew install python3
+$(brew --prefix)/bin/python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip setuptools wheel
 pip install -e .
@@ -71,6 +73,7 @@ npm start
 | 증상 | 해결 |
 |------|------|
 | `error: externally-managed-environment` | venv 활성화 필수: `source .venv/bin/activate` |
+| `setup.py not found` / editable mode 실패 | Xcode Python 대신 Homebrew Python 사용: `brew install python3` 후 venv 재생성 |
 | `pikepdf` 빌드 실패 | `brew install qpdf` 후 재시도 |
 | `pip install` 전반적 실패 | `pip install --upgrade pip` 후 재시도 |
 | `tesseract not found` | `brew install tesseract tesseract-lang` |

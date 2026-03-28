@@ -10,7 +10,7 @@ cd "$PROJECT_DIR"
 echo "=== Ancient PDF Master - Dev Mode ==="
 
 # Check critical dependencies
-for cmd in python3 node tesseract; do
+for cmd in node tesseract; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: $cmd not found."
     echo ""
@@ -18,8 +18,6 @@ for cmd in python3 node tesseract; do
       echo "Install: brew install tesseract tesseract-lang"
     elif [ "$cmd" = "node" ]; then
       echo "Install: brew install node"
-    elif [ "$cmd" = "python3" ]; then
-      echo "Install: brew install python3"
     fi
     echo ""
     echo "Or run the full installer: ./scripts/install-mac.sh"
@@ -27,11 +25,26 @@ for cmd in python3 node tesseract; do
   fi
 done
 
+# Find best Python — prefer Homebrew over Xcode
+PYTHON3=""
+if command -v brew &>/dev/null; then
+  BREW_PYTHON="$(brew --prefix)/bin/python3"
+  [ -x "$BREW_PYTHON" ] && PYTHON3="$BREW_PYTHON"
+fi
+if [ -z "$PYTHON3" ]; then
+  if command -v python3 &>/dev/null; then
+    PYTHON3="python3"
+  else
+    echo "ERROR: python3 not found. Install: brew install python3"
+    exit 1
+  fi
+fi
+
 # Setup venv if needed
 VENV_DIR="$PROJECT_DIR/.venv"
 if [ ! -d "$VENV_DIR" ]; then
   echo "Creating virtual environment..."
-  python3 -m venv "$VENV_DIR"
+  "$PYTHON3" -m venv "$VENV_DIR"
 fi
 source "$VENV_DIR/bin/activate"
 
