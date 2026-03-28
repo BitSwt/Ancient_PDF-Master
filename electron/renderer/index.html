@@ -31,7 +31,7 @@
 
     <!-- Status banner -->
     <div id="tesseract-status" class="status-banner hidden">
-      <span id="status-icon">⚠</span>
+      <span id="status-icon"></span>
       <span id="status-message">Checking Tesseract...</span>
     </div>
 
@@ -62,11 +62,11 @@
         <div class="checkbox-row">
           <label class="checkbox-item">
             <input type="checkbox" id="lang-grc" checked>
-            <span>Ancient Greek (Ἀρχαία Ἑλληνική)</span>
+            <span>Ancient Greek</span>
           </label>
           <label class="checkbox-item">
             <input type="checkbox" id="lang-lat" checked>
-            <span>Latin (Latina)</span>
+            <span>Latin</span>
           </label>
           <label class="checkbox-item">
             <input type="checkbox" id="lang-eng" checked>
@@ -87,15 +87,15 @@
       </div>
 
       <div class="settings-group">
-        <label class="settings-label" for="zone-preset">Page Layout (margin annotations)</label>
+        <label class="settings-label" for="zone-preset">Page Layout</label>
         <select id="zone-preset" class="select-input">
-          <option value="full_page">Full Page — single pass (default)</option>
-          <option value="left_margin">Left Margin — verse/section numbers in left margin</option>
-          <option value="both_margins">Both Margins — numbers left + apparatus right</option>
+          <option value="full_page">Full Page (default)</option>
+          <option value="left_margin">Left Margin</option>
+          <option value="both_margins">Both Margins</option>
           <option value="custom">Custom Zones</option>
         </select>
         <div class="zone-hint" id="zone-hint">
-          Tip: Use "Left Margin" for Loeb, OCT, Teubner editions with marginal verse numbers.
+          Use "Left Margin" for Loeb, OCT, Teubner editions with marginal verse numbers.
         </div>
       </div>
 
@@ -113,7 +113,7 @@
         <div id="zone-custom-entries"></div>
         <button id="btn-add-zone" class="btn-small" style="margin-top:8px;">+ Add Zone</button>
         <div class="zone-hint">
-          Define zones as percentage of page. PSM 11 = sparse text (best for margins), PSM 3 = auto (best for body).
+          Define zones as percentage of page. PSM 11 = sparse text (margins), PSM 3 = auto (body).
         </div>
       </div>
     </section>
@@ -121,8 +121,9 @@
     <!-- Bilingual Split Settings -->
     <section class="card">
       <h2>
-        <label class="checkbox-item" style="font-size:13px; text-transform:uppercase; letter-spacing:0.8px;">
+        <label class="toggle-switch">
           <input type="checkbox" id="split-enabled">
+          <span class="toggle-track"></span>
           <span>Bilingual Split</span>
         </label>
       </h2>
@@ -147,17 +148,17 @@
         </div>
 
         <div class="settings-group">
-          <label class="settings-label" for="split-common-pages">Common pages to duplicate in both (e.g. "1-3, 5")</label>
+          <label class="settings-label" for="split-common-pages">Common pages (e.g. "1-3, 5")</label>
           <input type="text" id="split-common-pages" class="text-input" placeholder="Leave empty if none">
         </div>
 
         <div class="settings-group">
           <label class="settings-label">Output file names</label>
           <div class="file-row" style="margin-bottom:6px;">
-            <input type="text" id="split-output-a" placeholder="Language A output (auto-generated)">
+            <input type="text" id="split-output-a" placeholder="Language A output (auto)">
           </div>
           <div class="file-row">
-            <input type="text" id="split-output-b" placeholder="Language B output (auto-generated)">
+            <input type="text" id="split-output-b" placeholder="Language B output (auto)">
           </div>
         </div>
       </div>
@@ -166,8 +167,9 @@
     <!-- Page Numbering -->
     <section class="card">
       <h2>
-        <label class="checkbox-item" style="font-size:13px; text-transform:uppercase; letter-spacing:0.8px;">
+        <label class="toggle-switch">
           <input type="checkbox" id="pagelabels-enabled">
+          <span class="toggle-track"></span>
           <span>Page Numbering</span>
         </label>
       </h2>
@@ -175,14 +177,14 @@
         <div class="settings-group">
           <label class="settings-label">Preset</label>
           <select id="pagelabels-preset" class="select-input">
-            <option value="roman-arabic">Front matter (Roman i,ii,iii) + Body (Arabic 1,2,3)</option>
+            <option value="roman-arabic">Front matter (Roman) + Body (Arabic)</option>
             <option value="custom">Custom ranges</option>
           </select>
         </div>
 
         <div id="pagelabels-simple">
           <div class="settings-group">
-            <label class="settings-label" for="pagelabels-body-start">Body starts at page (Arabic numbering begins)</label>
+            <label class="settings-label" for="pagelabels-body-start">Body starts at page</label>
             <input type="number" id="pagelabels-body-start" class="text-input" value="1" min="1" style="width:80px;">
           </div>
         </div>
@@ -197,19 +199,20 @@
     <!-- TOC Embedding -->
     <section class="card">
       <h2>
-        <label class="checkbox-item" style="font-size:13px; text-transform:uppercase; letter-spacing:0.8px;">
+        <label class="toggle-switch">
           <input type="checkbox" id="toc-enabled">
+          <span class="toggle-track"></span>
           <span>Table of Contents</span>
         </label>
       </h2>
       <div id="toc-settings" class="hidden">
         <div id="toc-entries"></div>
-        <div class="toc-actions" style="margin-top:8px; display:flex; gap:8px;">
+        <div style="margin-top:8px; display:flex; gap:8px;">
           <button id="btn-add-toc" class="btn-small">+ Add Entry</button>
           <button id="btn-import-toc" class="btn-small">Import from Text</button>
         </div>
         <div id="toc-import-area" class="hidden" style="margin-top:8px;">
-          <textarea id="toc-import-text" class="text-input" rows="6" placeholder="Paste TOC text here, one entry per line:&#10;Chapter 1 ... 5&#10;  Section 1.1 ... 8&#10;Chapter 2 ... 15"></textarea>
+          <textarea id="toc-import-text" class="text-input" rows="6" placeholder="Paste TOC text, one entry per line:&#10;Chapter 1 ... 5&#10;  Section 1.1 ... 8&#10;Chapter 2 ... 15"></textarea>
           <button id="btn-parse-toc" class="btn-small" style="margin-top:4px;">Parse</button>
         </div>
       </div>
@@ -218,7 +221,7 @@
     <!-- Action Buttons -->
     <div class="action-row">
       <button id="btn-start" class="btn btn-primary" disabled>
-        <span class="btn-icon">▶</span> Start OCR
+        Start OCR
       </button>
       <button id="btn-cancel" class="btn btn-danger" disabled>
         Cancel
