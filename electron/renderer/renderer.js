@@ -95,12 +95,17 @@ function getBasePath(filePath) {
 // ── Initialization ──
 
 async function init() {
+  // Show loading state while Python initializes (may auto-install packages)
+  tesseractStatus.classList.remove("hidden");
+  statusIcon.textContent = "⟳";
+  statusMessage.textContent = "Starting Python backend...";
+  log("[INFO] Initializing Python backend (may install packages on first run)...", "info");
+
   try {
     const result = await window.api.checkTesseract();
-    tesseractStatus.classList.remove("hidden");
 
     if (result.available) {
-      tesseractStatus.classList.add("success");
+      tesseractStatus.className = "status-banner success";
       statusIcon.textContent = "✓";
       statusMessage.textContent = result.message;
       log(`[OK] ${result.message}`, "ok");
@@ -125,14 +130,13 @@ async function init() {
         }
       }
     } else {
-      tesseractStatus.classList.add("error");
+      tesseractStatus.className = "status-banner error";
       statusIcon.textContent = "✗";
       statusMessage.textContent = result.message;
       log(`[ERROR] ${result.message}`, "error");
     }
   } catch (err) {
-    tesseractStatus.classList.remove("hidden");
-    tesseractStatus.classList.add("error");
+    tesseractStatus.className = "status-banner error";
     statusIcon.textContent = "✗";
 
     const msg = err.message || "Unknown error";
