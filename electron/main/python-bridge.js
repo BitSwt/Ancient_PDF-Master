@@ -20,14 +20,6 @@ class PythonBridge {
     this._spawn();
   }
 
-  _getPythonPath() {
-    // In production, Python scripts are in resources/python
-    if (app.isPackaged) {
-      return path.join(process.resourcesPath, "python", "bridge.py");
-    }
-    return path.join(__dirname, "../../src/ancient_pdf_master/bridge.py");
-  }
-
   _findPython() {
     const fs = require("fs");
 
@@ -45,13 +37,26 @@ class PythonBridge {
     return "python3";
   }
 
-  _spawn() {
-    const scriptPath = this._getPythonPath();
-    const python = this._findPython();
+  _getProjectRoot() {
+    if (app.isPackaged) {
+      return path.join(process.resourcesPath, "..");
+    }
+    return path.join(__dirname, "../..");
+  }
 
-    this._process = spawn(python, ["-u", scriptPath], {
+  _spawn() {
+    const python = this._findPython();
+    const projectRoot = this._getProjectRoot();
+
+    // Run as module (-m) so relative imports work correctly.
+    // In dev mode, PYTHONPATH points to src/ so "ancient_pdf_master.bridge" resolves.
+    // In production, the package is installed in the venv.
+    const srcDir = path.join(projectRoot, "src");
+
+    this._process = spawn(python, ["-u", "-m", "ancient_pdf_master.bridge"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      cwd: projectRoot,
+      env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONPATH: srcDir },
     });
 
     this._process.stdout.on("data", (chunk) => {
@@ -59,15 +64,22 @@ class PythonBridge {
       this._processBuffer();
     });
 
+    this._stderrBuffer = "";
     this._process.stderr.on("data", (chunk) => {
-      console.error("[Python stderr]", chunk.toString());
+      const text = chunk.toString();
+      this._stderrBuffer += text;
+      console.error("[Python stderr]", text);
     });
 
     this._process.on("exit", (code) => {
       console.log(`[Python] Process exited with code ${code}`);
-      // Reject all pending requests
+      const errorDetail = this._stderrBuffer.trim();
+      // Reject all pending requests with stderr output for debugging
       for (const [id, handler] of this._pending) {
-        handler.reject(new Error(`Python process exited (code ${code})`));
+        const msg = errorDetail
+          ? `Python backend error (code ${code}): ${errorDetail.split("\n").pop()}`
+          : `Python process exited (code ${code})`;
+        handler.reject(new Error(msg));
       }
       this._pending.clear();
     });
