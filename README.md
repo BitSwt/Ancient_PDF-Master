@@ -49,18 +49,32 @@ cd Ancient_PDF-Master
 git clone https://github.com/bitswt/Ancient_PDF-Master.git
 cd Ancient_PDF-Master
 
+# Python 가상환경 (필수 - venv 없이 pip install하면 PEP 668 에러 발생)
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
 pip install -e .
+
+# Node.js
 npm install
 npm start
 ```
 
-또는 원커맨드 (venv 자동 생성):
+또는 원커맨드 (venv + pip 업그레이드 자동):
 
 ```bash
 ./scripts/run-dev.sh
 ```
+
+### Troubleshooting
+
+| 증상 | 해결 |
+|------|------|
+| `error: externally-managed-environment` | venv 활성화 필수: `source .venv/bin/activate` |
+| `pikepdf` 빌드 실패 | `brew install qpdf` 후 재시도 |
+| `pip install` 전반적 실패 | `pip install --upgrade pip` 후 재시도 |
+| `tesseract not found` | `brew install tesseract tesseract-lang` |
+| `npm start` 실패 | `npm install` 확인, Node.js 18+ 필요 |
 
 ## Building DMG
 
@@ -114,8 +128,9 @@ tests/
 ## Testing
 
 ```bash
+source .venv/bin/activate
 pip install -e ".[dev]"
-pytest
+python3 -m pytest
 ```
 
 ## License
