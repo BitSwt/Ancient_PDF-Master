@@ -122,10 +122,24 @@
 
           <div id="zone-params" class="hidden">
             <div class="settings-group">
-              <label class="settings-label">Margin width (%)</label>
+              <label class="settings-label">Left/Right margin (%)</label>
               <div class="slider-row">
-                <input type="range" id="zone-margin-width" min="5" max="25" value="12" class="slider-input">
+                <input type="range" id="zone-margin-width" min="3" max="40" value="12" class="slider-input">
                 <span id="zone-margin-label" class="slider-label">12%</span>
+              </div>
+            </div>
+            <div class="settings-group">
+              <label class="settings-label">Top margin (%)</label>
+              <div class="slider-row">
+                <input type="range" id="zone-margin-top" min="0" max="30" value="8" class="slider-input">
+                <span id="zone-margin-top-label" class="slider-label">8%</span>
+              </div>
+            </div>
+            <div class="settings-group">
+              <label class="settings-label">Bottom margin (%)</label>
+              <div class="slider-row">
+                <input type="range" id="zone-margin-bottom" min="0" max="30" value="8" class="slider-input">
+                <span id="zone-margin-bottom-label" class="slider-label">8%</span>
               </div>
             </div>
           </div>
@@ -147,6 +161,26 @@
           <div id="zone-custom" class="hidden">
             <div id="zone-custom-entries"></div>
             <button id="btn-add-zone" class="btn-small" style="margin-top:8px;">+ Add Zone</button>
+          </div>
+        </section>
+
+        <!-- Crop -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="crop-enabled">
+              <span class="toggle-track"></span>
+              <span>Crop</span>
+            </label>
+          </h2>
+          <div id="crop-settings" class="hidden">
+            <div class="zone-hint" style="margin-bottom:8px;">Crop pages to selected area. Drag edges/corners on preview to adjust.</div>
+            <div class="crop-controls">
+              <button id="btn-crop-set" class="btn btn-secondary" style="flex:1;">Set Crop Area</button>
+              <button id="btn-crop-reset" class="btn-small">Reset</button>
+              <button id="btn-crop-apply-all" class="btn-small">Apply to All</button>
+            </div>
+            <div class="crop-info" id="crop-info" style="margin-top:6px;"></div>
           </div>
         </section>
 
@@ -288,9 +322,10 @@
           </h2>
           <div id="toc-settings" class="hidden">
             <div id="toc-entries"></div>
-            <div style="margin-top:8px; display:flex; gap:8px;">
-              <button id="btn-add-toc" class="btn-small">+ Add Entry</button>
-              <button id="btn-import-toc" class="btn-small">Import Text</button>
+            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="btn-detect-toc" class="btn btn-secondary" style="flex:1;">Auto Detect</button>
+              <button id="btn-add-toc" class="btn-small">+ Add</button>
+              <button id="btn-import-toc" class="btn-small">Import</button>
             </div>
             <div id="toc-import-area" class="hidden" style="margin-top:8px;">
               <textarea id="toc-import-text" class="text-input" rows="5" placeholder="Chapter 1 ... 5&#10;  Section 1.1 ... 8"></textarea>
@@ -350,6 +385,11 @@
             <input type="checkbox" id="pv-show-zones" checked>
             <span class="toggle-track"></span>
             <span>Zones</span>
+          </label>
+          <label class="toggle-switch compact">
+            <input type="checkbox" id="pv-show-crop" checked>
+            <span class="toggle-track"></span>
+            <span>Crop</span>
           </label>
           <label class="toggle-switch compact">
             <input type="checkbox" id="pv-show-preprocess">

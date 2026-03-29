@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("api", {
   loadPreview: (params) => ipcRenderer.invoke("load-preview", params),
   previewPreprocess: (params) => ipcRenderer.invoke("preview-preprocess", params),
   detectRegions: (params) => ipcRenderer.invoke("detect-regions", params),
+  detectToc: (params) => ipcRenderer.invoke("detect-toc", params),
 
   // File operations
   openFile: (path) => ipcRenderer.invoke("open-file", path),

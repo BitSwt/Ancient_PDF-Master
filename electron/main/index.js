@@ -126,6 +126,10 @@ ipcMain.handle("detect-regions", async (_event, params) => {
   return pythonBridge.send("detect_regions", params);
 });
 
+ipcMain.handle("detect-toc", async (_event, params) => {
+  return pythonBridge.send("detect_toc", params);
+});
+
 ipcMain.handle("open-file", async (_event, filePath) => {
   shell.openPath(filePath);
 });

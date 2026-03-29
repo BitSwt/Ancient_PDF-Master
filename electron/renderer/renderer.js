@@ -63,6 +63,10 @@ const zoneParams = document.getElementById("zone-params");
 const zoneCustom = document.getElementById("zone-custom");
 const zoneMarginWidth = document.getElementById("zone-margin-width");
 const zoneMarginLabel = document.getElementById("zone-margin-label");
+const zoneMarginTop = document.getElementById("zone-margin-top");
+const zoneMarginTopLabel = document.getElementById("zone-margin-top-label");
+const zoneMarginBottom = document.getElementById("zone-margin-bottom");
+const zoneMarginBottomLabel = document.getElementById("zone-margin-bottom-label");
 const zoneCustomEntries = document.getElementById("zone-custom-entries");
 const zoneAutoDetect = document.getElementById("zone-auto-detect");
 const btnDetectRegions = document.getElementById("btn-detect-regions");
@@ -95,7 +99,16 @@ const previewPageInfo = document.getElementById("preview-page-info");
 const btnPrevPage = document.getElementById("btn-prev-page");
 const btnNextPage = document.getElementById("btn-next-page");
 const pvShowZones = document.getElementById("pv-show-zones");
+const pvShowCrop = document.getElementById("pv-show-crop");
 const pvShowPreprocess = document.getElementById("pv-show-preprocess");
+
+// Crop elements
+const cropEnabled = document.getElementById("crop-enabled");
+const cropSettings = document.getElementById("crop-settings");
+const btnCropSet = document.getElementById("btn-crop-set");
+const btnCropReset = document.getElementById("btn-crop-reset");
+const btnCropApplyAll = document.getElementById("btn-crop-apply-all");
+const cropInfo = document.getElementById("crop-info");
 
 // Zoom controls
 const btnZoomIn = document.getElementById("btn-zoom-in");
@@ -119,6 +132,9 @@ let totalPages = 0;
 let detectedRegions = {};
 // Currently selected region index for resizing
 let regionDragState = null;
+// Crop areas per page: { pageIndex: {x_start, y_start, x_end, y_end} }
+let cropAreas = {};
+let cropDragState = null;
 
 // ── Logging ──
 
@@ -288,6 +304,7 @@ function showPage(index) {
   if (index < 0 || index >= totalPages) return;
   currentPage = index;
   previewPageInfo.textContent = `${index + 1} / ${totalPages}`;
+  updateCropInfo();
 
   if (pvShowPreprocess.checked && preprocessEnabled.checked) {
     loadPreprocessedPage(index);
@@ -329,27 +346,34 @@ async function loadPreprocessedPage(index) {
 let marginDragState = null; // { edge: "left"|"right", startX, startMargin }
 const DRAG_HANDLE_WIDTH = 8; // px hit area for drag handles
 
+function getMarginValues() {
+  return {
+    lr: parseInt(zoneMarginWidth.value) / 100,
+    top: parseInt(zoneMarginTop.value) / 100,
+    bottom: parseInt(zoneMarginBottom.value) / 100,
+  };
+}
+
 function getMarginZones() {
   const preset = zonePreset.value;
-  const mw = parseInt(zoneMarginWidth.value) / 100;
+  const m = getMarginValues();
   if (preset === "left_margin") {
     return [
-      { x: 0, y: 0, w: mw, h: 1, label: "Margin" },
-      { x: mw, y: 0, w: 1 - mw, h: 1, label: "Body" },
+      { x: 0, y: m.top, w: m.lr, h: 1 - m.top - m.bottom, label: "Margin" },
+      { x: m.lr, y: m.top, w: 1 - m.lr, h: 1 - m.top - m.bottom, label: "Body" },
     ];
   } else if (preset === "both_margins") {
-    // Symmetric: odd pages have left margin at left, even pages mirror
-    const isEvenPage = (currentPage % 2 === 1); // 0-indexed
+    const isEvenPage = (currentPage % 2 === 1);
     if (isEvenPage) {
       return [
-        { x: 0, y: 0, w: 1 - mw, h: 1, label: "Body" },
-        { x: 1 - mw, y: 0, w: mw, h: 1, label: "Margin" },
+        { x: 0, y: m.top, w: 1 - m.lr, h: 1 - m.top - m.bottom, label: "Body" },
+        { x: 1 - m.lr, y: m.top, w: m.lr, h: 1 - m.top - m.bottom, label: "Margin" },
       ];
     }
     return [
-      { x: 0, y: 0, w: mw, h: 1, label: "L.Margin" },
-      { x: mw, y: 0, w: 1 - 2 * mw, h: 1, label: "Body" },
-      { x: 1 - mw, y: 0, w: mw, h: 1, label: "R.Margin" },
+      { x: 0, y: m.top, w: m.lr, h: 1 - m.top - m.bottom, label: "L.Margin" },
+      { x: m.lr, y: m.top, w: 1 - 2 * m.lr, h: 1 - m.top - m.bottom, label: "Body" },
+      { x: 1 - m.lr, y: m.top, w: m.lr, h: 1 - m.top - m.bottom, label: "R.Margin" },
     ];
   }
   return null;
@@ -357,21 +381,27 @@ function getMarginZones() {
 
 function getDraggableEdges() {
   const preset = zonePreset.value;
-  const mw = parseInt(zoneMarginWidth.value) / 100;
-  const w = previewOverlay.width;
+  const m = getMarginValues();
+  const edges = [];
+
+  // Top/bottom edges (common to both presets)
+  if (preset === "left_margin" || preset === "both_margins") {
+    edges.push({ edge: "top", yFrac: m.top, axis: "h" });
+    edges.push({ edge: "bottom", yFrac: 1 - m.bottom, axis: "h" });
+  }
+
   if (preset === "left_margin") {
-    return [{ edge: "right-of-left", xFrac: mw }];
+    edges.push({ edge: "right-of-left", xFrac: m.lr, axis: "v" });
   } else if (preset === "both_margins") {
     const isEvenPage = (currentPage % 2 === 1);
     if (isEvenPage) {
-      return [{ edge: "left-of-right", xFrac: 1 - mw }];
+      edges.push({ edge: "left-of-right", xFrac: 1 - m.lr, axis: "v" });
+    } else {
+      edges.push({ edge: "right-of-left", xFrac: m.lr, axis: "v" });
+      edges.push({ edge: "left-of-right", xFrac: 1 - m.lr, axis: "v" });
     }
-    return [
-      { edge: "right-of-left", xFrac: mw },
-      { edge: "left-of-right", xFrac: 1 - mw },
-    ];
   }
-  return [];
+  return edges;
 }
 
 function drawZoneOverlay() {
@@ -405,6 +435,16 @@ function drawZoneOverlay() {
   let zones = [];
   if (preset === "left_margin" || preset === "both_margins") {
     zones = getMarginZones() || [];
+    // Dim excluded top/bottom margins
+    const m = getMarginValues();
+    if (m.top > 0) {
+      ctx.fillStyle = "rgba(248, 81, 73, 0.1)";
+      ctx.fillRect(0, 0, w, m.top * h);
+    }
+    if (m.bottom > 0) {
+      ctx.fillStyle = "rgba(248, 81, 73, 0.1)";
+      ctx.fillRect(0, (1 - m.bottom) * h, w, m.bottom * h);
+    }
   } else if (preset === "body_only") {
     const m = parseInt(zoneBodyMargin.value) / 100;
     zones = [
@@ -473,31 +513,119 @@ function drawZoneOverlay() {
     ctx.fillText(zone.label, zone.x * w + 4, zone.y * h + 14);
   });
 
-  // Draw drag handles on margin edges (for margin presets)
+  // Draw drag handles on all edges (for margin presets)
   const edges = getDraggableEdges();
   edges.forEach((e) => {
-    const xPx = e.xFrac * w;
     ctx.fillStyle = "rgba(52, 208, 88, 0.7)";
-    ctx.fillRect(xPx - 2, h * 0.35, 4, h * 0.3);
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.font = "bold 14px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("⇔", xPx, h * 0.5 + 5);
+    if (e.axis === "v") {
+      // Vertical edge (left/right margin boundary)
+      const xPx = e.xFrac * w;
+      ctx.fillRect(xPx - 2, h * 0.35, 4, h * 0.3);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillText("⇔", xPx, h * 0.5 + 5);
+    } else {
+      // Horizontal edge (top/bottom margin boundary)
+      const yPx = e.yFrac * h;
+      ctx.fillRect(w * 0.35, yPx - 2, w * 0.3, 4);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillText("⇕", w * 0.5, yPx + 5);
+    }
     ctx.textAlign = "left";
   });
+
+  // Draw crop overlay
+  _drawCropOverlay(ctx, w, h);
+}
+
+function _drawCropOverlay(ctx, w, h) {
+  if (!cropEnabled.checked || !pvShowCrop.checked) return;
+  const crop = cropAreas[currentPage];
+  if (!crop) return;
+
+  const cx1 = crop.x_start * w;
+  const cy1 = crop.y_start * h;
+  const cx2 = crop.x_end * w;
+  const cy2 = crop.y_end * h;
+  const cw = cx2 - cx1;
+  const ch = cy2 - cy1;
+
+  // Dim outside crop area
+  ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+  ctx.fillRect(0, 0, w, cy1);                      // top
+  ctx.fillRect(0, cy2, w, h - cy2);                // bottom
+  ctx.fillRect(0, cy1, cx1, ch);                    // left
+  ctx.fillRect(cx2, cy1, w - cx2, ch);             // right
+
+  // Crop border
+  ctx.strokeStyle = "rgba(255, 200, 50, 0.9)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 3]);
+  ctx.strokeRect(cx1, cy1, cw, ch);
+  ctx.setLineDash([]);
+
+  // Corner handles
+  const hs = 7;
+  ctx.fillStyle = "rgba(255, 200, 50, 0.95)";
+  for (const [hx, hy] of [[cx1, cy1], [cx2, cy1], [cx1, cy2], [cx2, cy2]]) {
+    ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+  }
+  // Edge midpoint handles
+  const ms = 5;
+  ctx.fillStyle = "rgba(255, 200, 50, 0.8)";
+  for (const [hx, hy] of [[(cx1+cx2)/2, cy1], [(cx1+cx2)/2, cy2], [cx1, (cy1+cy2)/2], [cx2, (cy1+cy2)/2]]) {
+    ctx.fillRect(hx - ms / 2, hy - ms / 2, ms, ms);
+  }
+
+  // Label
+  ctx.fillStyle = "rgba(255, 200, 50, 0.9)";
+  ctx.font = "bold 11px -apple-system, sans-serif";
+  ctx.fillText("CROP", cx1 + 4, cy1 - 4);
 }
 
 // ── Margin Drag Interaction ──
 
 previewOverlay.addEventListener("mousedown", (e) => {
-  const preset = zonePreset.value;
-  if (!pvShowZones.checked) return;
-
   const rect = previewOverlay.getBoundingClientRect();
   const mouseX = e.clientX - rect.left;
   const mouseY = e.clientY - rect.top;
   const w = previewOverlay.width;
   const h = previewOverlay.height;
+
+  // Crop drag (takes priority)
+  if (cropEnabled.checked && pvShowCrop.checked && cropAreas[currentPage]) {
+    const crop = cropAreas[currentPage];
+    const HANDLE = 10;
+    const cx1 = crop.x_start * w, cy1 = crop.y_start * h;
+    const cx2 = crop.x_end * w, cy2 = crop.y_end * h;
+
+    const handles = [
+      { side: "nw", x: cx1, y: cy1 }, { side: "ne", x: cx2, y: cy1 },
+      { side: "sw", x: cx1, y: cy2 }, { side: "se", x: cx2, y: cy2 },
+      { side: "n", x: (cx1+cx2)/2, y: cy1 }, { side: "s", x: (cx1+cx2)/2, y: cy2 },
+      { side: "w", x: cx1, y: (cy1+cy2)/2 }, { side: "e", x: cx2, y: (cy1+cy2)/2 },
+    ];
+
+    for (const handle of handles) {
+      if (Math.abs(mouseX - handle.x) < HANDLE && Math.abs(mouseY - handle.y) < HANDLE) {
+        cropDragState = { side: handle.side, orig: { ...crop } };
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Move entire crop box
+    if (mouseX >= cx1 && mouseX <= cx2 && mouseY >= cy1 && mouseY <= cy2) {
+      cropDragState = { side: "move", orig: { ...crop }, startX: mouseX, startY: mouseY };
+      previewOverlay.style.cursor = "move";
+      e.preventDefault();
+      return;
+    }
+  }
+
+  const preset = zonePreset.value;
+  if (!pvShowZones.checked) return;
 
   // Auto-detect: check region handles
   if (preset === "auto_detect") {
@@ -555,17 +683,27 @@ previewOverlay.addEventListener("mousedown", (e) => {
     return;
   }
 
-  // Margin presets
+  // Margin presets (left_margin, both_margins)
   if (preset !== "left_margin" && preset !== "both_margins") return;
 
   const edges = getDraggableEdges();
   for (const edge of edges) {
-    const edgePx = edge.xFrac * w;
-    if (Math.abs(mouseX - edgePx) < DRAG_HANDLE_WIDTH) {
-      marginDragState = { edge: edge.edge, startX: mouseX, startMargin: parseInt(zoneMarginWidth.value) };
-      previewOverlay.style.cursor = "col-resize";
-      e.preventDefault();
-      return;
+    if (edge.axis === "v") {
+      const edgePx = edge.xFrac * w;
+      if (Math.abs(mouseX - edgePx) < DRAG_HANDLE_WIDTH) {
+        marginDragState = { edge: edge.edge, axis: "v" };
+        previewOverlay.style.cursor = "col-resize";
+        e.preventDefault();
+        return;
+      }
+    } else {
+      const edgePx = edge.yFrac * h;
+      if (Math.abs(mouseY - edgePx) < DRAG_HANDLE_WIDTH) {
+        marginDragState = { edge: edge.edge, axis: "h" };
+        previewOverlay.style.cursor = "row-resize";
+        e.preventDefault();
+        return;
+      }
     }
   }
 });
@@ -576,6 +714,42 @@ document.addEventListener("mousemove", (e) => {
   const mouseY = e.clientY - rect.top;
   const w = previewOverlay.width;
   const h = previewOverlay.height;
+
+  // Handle crop drag
+  if (cropDragState) {
+    const crop = cropAreas[currentPage];
+    if (!crop) return;
+    const orig = cropDragState.orig;
+    const fracX = Math.max(0, Math.min(1, mouseX / w));
+    const fracY = Math.max(0, Math.min(1, mouseY / h));
+
+    switch (cropDragState.side) {
+      case "nw": crop.x_start = fracX; crop.y_start = fracY; break;
+      case "ne": crop.x_end = fracX; crop.y_start = fracY; break;
+      case "sw": crop.x_start = fracX; crop.y_end = fracY; break;
+      case "se": crop.x_end = fracX; crop.y_end = fracY; break;
+      case "n": crop.y_start = fracY; break;
+      case "s": crop.y_end = fracY; break;
+      case "w": crop.x_start = fracX; break;
+      case "e": crop.x_end = fracX; break;
+      case "move": {
+        const dx = (mouseX - cropDragState.startX) / w;
+        const dy = (mouseY - cropDragState.startY) / h;
+        const cw = orig.x_end - orig.x_start;
+        const ch = orig.y_end - orig.y_start;
+        crop.x_start = Math.max(0, Math.min(1 - cw, orig.x_start + dx));
+        crop.y_start = Math.max(0, Math.min(1 - ch, orig.y_start + dy));
+        crop.x_end = crop.x_start + cw;
+        crop.y_end = crop.y_start + ch;
+        break;
+      }
+    }
+    if (crop.x_end < crop.x_start + 0.05) crop.x_end = crop.x_start + 0.05;
+    if (crop.y_end < crop.y_start + 0.05) crop.y_end = crop.y_start + 0.05;
+    drawZoneOverlay();
+    updateCropInfo();
+    return;
+  }
 
   // Handle region drag (auto_detect)
   if (regionDragState) {
@@ -635,20 +809,48 @@ document.addEventListener("mousemove", (e) => {
       return;
     }
 
-    let newMarginFrac;
-    if (marginDragState.edge === "right-of-left") {
-      newMarginFrac = mouseX / w;
+    if (marginDragState.edge === "top") {
+      const pct = Math.round(Math.max(0, Math.min(30, (mouseY / h) * 100)));
+      zoneMarginTop.value = pct;
+      zoneMarginTopLabel.textContent = `${pct}%`;
+    } else if (marginDragState.edge === "bottom") {
+      const pct = Math.round(Math.max(0, Math.min(30, (1 - mouseY / h) * 100)));
+      zoneMarginBottom.value = pct;
+      zoneMarginBottomLabel.textContent = `${pct}%`;
     } else {
-      newMarginFrac = 1 - (mouseX / w);
+      let newMarginFrac;
+      if (marginDragState.edge === "right-of-left") {
+        newMarginFrac = mouseX / w;
+      } else {
+        newMarginFrac = 1 - (mouseX / w);
+      }
+      const newMarginPct = Math.round(Math.max(3, Math.min(40, newMarginFrac * 100)));
+      zoneMarginWidth.value = newMarginPct;
+      zoneMarginLabel.textContent = `${newMarginPct}%`;
     }
-    const newMarginPct = Math.round(Math.max(5, Math.min(40, newMarginFrac * 100)));
-    zoneMarginWidth.value = newMarginPct;
-    zoneMarginLabel.textContent = `${newMarginPct}%`;
     drawZoneOverlay();
     return;
   }
 
-  // Hover cursor updates
+  // Hover cursor updates — crop first
+  if (cropEnabled.checked && pvShowCrop.checked && cropAreas[currentPage]) {
+    const crop = cropAreas[currentPage];
+    const HANDLE = 10;
+    const cx1 = crop.x_start * w, cy1 = crop.y_start * h;
+    const cx2 = crop.x_end * w, cy2 = crop.y_end * h;
+    let cc = "";
+    if (Math.abs(mouseX - cx1) < HANDLE && Math.abs(mouseY - cy1) < HANDLE) cc = "nw-resize";
+    else if (Math.abs(mouseX - cx2) < HANDLE && Math.abs(mouseY - cy1) < HANDLE) cc = "ne-resize";
+    else if (Math.abs(mouseX - cx1) < HANDLE && Math.abs(mouseY - cy2) < HANDLE) cc = "sw-resize";
+    else if (Math.abs(mouseX - cx2) < HANDLE && Math.abs(mouseY - cy2) < HANDLE) cc = "se-resize";
+    else if (mouseX >= cx1 && mouseX <= cx2 && Math.abs(mouseY - cy1) < HANDLE) cc = "n-resize";
+    else if (mouseX >= cx1 && mouseX <= cx2 && Math.abs(mouseY - cy2) < HANDLE) cc = "s-resize";
+    else if (mouseY >= cy1 && mouseY <= cy2 && Math.abs(mouseX - cx1) < HANDLE) cc = "w-resize";
+    else if (mouseY >= cy1 && mouseY <= cy2 && Math.abs(mouseX - cx2) < HANDLE) cc = "e-resize";
+    else if (mouseX >= cx1 && mouseX <= cx2 && mouseY >= cy1 && mouseY <= cy2) cc = "move";
+    if (cc) { previewOverlay.style.cursor = cc; return; }
+  }
+
   const preset = zonePreset.value;
   if (!pvShowZones.checked) return;
 
@@ -675,25 +877,21 @@ document.addEventListener("mousemove", (e) => {
     previewOverlay.style.cursor = cursor;
   } else if (preset === "left_margin" || preset === "both_margins") {
     const edges = getDraggableEdges();
-    let onEdge = false;
+    let cursor = "default";
     for (const edge of edges) {
-      if (Math.abs(mouseX - edge.xFrac * w) < DRAG_HANDLE_WIDTH) { onEdge = true; break; }
+      if (edge.axis === "v" && Math.abs(mouseX - edge.xFrac * w) < DRAG_HANDLE_WIDTH) { cursor = "col-resize"; break; }
+      if (edge.axis === "h" && Math.abs(mouseY - edge.yFrac * h) < DRAG_HANDLE_WIDTH) { cursor = "row-resize"; break; }
     }
-    previewOverlay.style.cursor = onEdge ? "col-resize" : "default";
+    previewOverlay.style.cursor = cursor;
   } else {
     previewOverlay.style.cursor = "default";
   }
 });
 
 document.addEventListener("mouseup", () => {
-  if (marginDragState) {
-    marginDragState = null;
-    previewOverlay.style.cursor = "default";
-  }
-  if (regionDragState) {
-    regionDragState = null;
-    previewOverlay.style.cursor = "default";
-  }
+  if (cropDragState) { cropDragState = null; previewOverlay.style.cursor = "default"; }
+  if (marginDragState) { marginDragState = null; previewOverlay.style.cursor = "default"; }
+  if (regionDragState) { regionDragState = null; previewOverlay.style.cursor = "default"; }
 });
 
 btnPrevPage.addEventListener("click", () => showPage(currentPage - 1));
@@ -722,6 +920,16 @@ zonePreset.addEventListener("change", () => {
 
 zoneMarginWidth.addEventListener("input", () => {
   zoneMarginLabel.textContent = `${zoneMarginWidth.value}%`;
+  drawZoneOverlay();
+});
+
+zoneMarginTop.addEventListener("input", () => {
+  zoneMarginTopLabel.textContent = `${zoneMarginTop.value}%`;
+  drawZoneOverlay();
+});
+
+zoneMarginBottom.addEventListener("input", () => {
+  zoneMarginBottomLabel.textContent = `${zoneMarginBottom.value}%`;
   drawZoneOverlay();
 });
 
@@ -785,6 +993,48 @@ function renderRegionList(pageIndex) {
 }
 
 // ── Toggle Sections ──
+
+cropEnabled.addEventListener("change", () => {
+  cropSettings.classList.toggle("hidden", !cropEnabled.checked);
+  drawZoneOverlay();
+});
+
+btnCropSet.addEventListener("click", () => {
+  if (totalPages === 0) return;
+  // Default crop: 5% inset from all edges
+  cropAreas[currentPage] = { x_start: 0.05, y_start: 0.05, x_end: 0.95, y_end: 0.95 };
+  updateCropInfo();
+  drawZoneOverlay();
+  log(`[OK] Crop area set for page ${currentPage + 1}. Drag edges to adjust.`, "ok");
+});
+
+btnCropReset.addEventListener("click", () => {
+  delete cropAreas[currentPage];
+  updateCropInfo();
+  drawZoneOverlay();
+});
+
+btnCropApplyAll.addEventListener("click", () => {
+  const current = cropAreas[currentPage];
+  if (!current) { log("[WARN] Set crop on current page first", "warn"); return; }
+  for (let i = 0; i < totalPages; i++) {
+    cropAreas[i] = { ...current };
+  }
+  updateCropInfo();
+  log(`[OK] Crop applied to all ${totalPages} pages`, "ok");
+});
+
+pvShowCrop.addEventListener("change", drawZoneOverlay);
+
+function updateCropInfo() {
+  const c = cropAreas[currentPage];
+  if (c) {
+    const pct = (v) => Math.round(v * 100);
+    cropInfo.textContent = `Page ${currentPage + 1}: ${pct(c.x_start)}%-${pct(c.x_end)}% × ${pct(c.y_start)}%-${pct(c.y_end)}%`;
+  } else {
+    cropInfo.textContent = "";
+  }
+}
 
 preprocessEnabled.addEventListener("change", () => {
   preprocessSettings.classList.toggle("hidden", !preprocessEnabled.checked);
@@ -912,10 +1162,10 @@ function getZoneConfig() {
     });
     return { zone_preset: "custom", zones };
   }
-  const marginWidth = parseInt(zoneMarginWidth.value) / 100;
-  const zoneParamsObj = {};
-  if (preset === "left_margin") zoneParamsObj.margin_width = marginWidth;
-  else if (preset === "both_margins") { zoneParamsObj.left_margin = marginWidth; zoneParamsObj.right_margin = marginWidth; }
+  const m = getMarginValues();
+  const zoneParamsObj = { body_margin_top: m.top, body_margin_bottom: m.bottom };
+  if (preset === "left_margin") zoneParamsObj.margin_width = m.lr;
+  else if (preset === "both_margins") { zoneParamsObj.left_margin = m.lr; zoneParamsObj.right_margin = m.lr; }
   return { zone_preset: preset, zone_params: zoneParamsObj };
 }
 
@@ -1001,6 +1251,42 @@ function addTocEntry(title = "", page = 1, level = 0) {
   row.querySelector(".toc-delete").addEventListener("click", () => row.remove());
   tocEntries.appendChild(row);
 }
+
+const btnDetectToc = document.getElementById("btn-detect-toc");
+
+btnDetectToc.addEventListener("click", async () => {
+  if (!inputPath.value) { log("[WARN] No file loaded", "warn"); return; }
+  btnDetectToc.disabled = true;
+  btnDetectToc.textContent = "Detecting...";
+  log("[INFO] Scanning pages for TOC entries...", "info");
+
+  try {
+    const lang = getSelectedLanguages();
+    const result = await window.api.detectToc({
+      input: inputPath.value,
+      dpi: 200,
+      lang,
+    });
+
+    if (result.entries.length === 0) {
+      log("[WARN] No TOC entries detected. Try importing manually.", "warn");
+    } else {
+      // Clear existing entries and add detected ones
+      tocEntries.innerHTML = "";
+      for (const e of result.entries) {
+        addTocEntry(e.title, e.page, e.level);
+      }
+      tocEnabled.checked = true;
+      tocSettings.classList.remove("hidden");
+      log(`[OK] Detected ${result.total} TOC entries`, "ok");
+    }
+  } catch (err) {
+    log(`[ERROR] TOC detection failed: ${err.message}`, "error");
+  } finally {
+    btnDetectToc.disabled = false;
+    btnDetectToc.textContent = "Auto Detect";
+  }
+});
 
 btnAddToc.addEventListener("click", () => addTocEntry());
 btnImportToc.addEventListener("click", () => tocImportArea.classList.toggle("hidden"));
@@ -1089,6 +1375,7 @@ btnStart.addEventListener("click", async () => {
       if (autoDeskew.checked) params.auto_deskew = true;
       if (confidenceRetry.checked) params.min_confidence = 95.0;
       if (pageRangeInput.value.trim()) params.page_range = pageRangeInput.value.trim();
+      if (cropEnabled.checked && Object.keys(cropAreas).length > 0) params.crop = cropAreas;
       Object.assign(params, getZoneConfig());
       const preprocess = getPreprocessConfig();
       if (preprocess) params.preprocess = preprocess;

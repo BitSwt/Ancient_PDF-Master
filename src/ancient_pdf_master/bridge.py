@@ -153,6 +153,26 @@ def handle_start_ocr(params: dict) -> dict:
 
     total = len(images)
 
+    # Crop pages if configured
+    crop_config = params.get("crop")
+    if crop_config:
+        send_event("progress", {"current": 0, "total": total, "message": "Cropping pages..."})
+        for i in range(len(images)):
+            # crop_config keys are string page indices from JS
+            page_key = str(i)
+            if selected_indices is not None:
+                # Map back to original page index
+                page_key = str(selected_indices[i]) if i < len(selected_indices) else str(i)
+            crop = crop_config.get(page_key) or crop_config.get(str(i))
+            if crop:
+                img = images[i]
+                x1 = int(crop["x_start"] * img.width)
+                y1 = int(crop["y_start"] * img.height)
+                x2 = int(crop["x_end"] * img.width)
+                y2 = int(crop["y_end"] * img.height)
+                images[i] = img.crop((x1, y1, x2, y2))
+        send_event("progress", {"current": total, "total": total, "message": "Crop done"})
+
     # Auto deskew (independent of preprocessing toggle)
     if auto_deskew:
         from .preprocess import _deskew
@@ -182,66 +202,113 @@ def handle_start_ocr(params: dict) -> dict:
     if total == 0:
         raise ValueError("No pages found in the input file.")
 
-    # OCR each page
-    ocr_results = []
-    for i, image in enumerate(images):
+    # OCR each page (parallel when possible)
+    import concurrent.futures
+    import os
+
+    max_workers = min(os.cpu_count() or 2, total, 4)
+
+    def _ocr_one(i_image):
+        idx, img = i_image
         if _cancel_flag.is_set():
-            raise ValueError("Processing cancelled.")
-
-        zone_label = f" ({zone_preset})" if zones else ""
-        send_event("progress", {
-            "current": i + 1,
-            "total": total,
-            "message": f"OCR page {i + 1}/{total}{zone_label}...",
-        })
-
+            return idx, None
         if zones:
-            result = ocr_page_with_zones(image, zones, lang=lang)
-        else:
-            result = ocr_page(image, lang=lang)
-        ocr_results.append(result)
+            return idx, ocr_page_with_zones(img, zones, lang=lang)
+        return idx, ocr_page(img, lang=lang)
 
+    ocr_results = [None] * total
+
+    if total >= 2 and max_workers >= 2:
+        # Parallel OCR
         send_event("progress", {
-            "current": i + 1,
-            "total": total,
-            "message": f"OCR page {i + 1}/{total} complete",
-            "page_result": {
-                "page": i + 1,
-                "words": result.word_count,
-                "confidence": result.page_confidence,
-            },
+            "current": 0, "total": total,
+            "message": f"OCR {total} pages ({max_workers} threads)...",
         })
+        done_count = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_ocr_one, (i, img)): i for i, img in enumerate(images)}
+            for future in concurrent.futures.as_completed(futures):
+                idx, result = future.result()
+                if result is None:
+                    raise ValueError("Processing cancelled.")
+                ocr_results[idx] = result
+                done_count += 1
+                send_event("progress", {
+                    "current": done_count,
+                    "total": total,
+                    "message": f"OCR page {idx + 1}/{total} complete",
+                    "page_result": {
+                        "page": idx + 1,
+                        "words": result.word_count,
+                        "confidence": result.page_confidence,
+                    },
+                })
+    else:
+        # Sequential OCR (single page)
+        for i, image in enumerate(images):
+            if _cancel_flag.is_set():
+                raise ValueError("Processing cancelled.")
+            zone_label = f" ({zone_preset})" if zones else ""
+            send_event("progress", {
+                "current": i + 1, "total": total,
+                "message": f"OCR page {i + 1}/{total}{zone_label}...",
+            })
+            _, result = _ocr_one((i, image))
+            if result is None:
+                raise ValueError("Processing cancelled.")
+            ocr_results[i] = result
+            send_event("progress", {
+                "current": i + 1, "total": total,
+                "message": f"OCR page {i + 1}/{total} complete",
+                "page_result": {
+                    "page": i + 1,
+                    "words": result.word_count,
+                    "confidence": result.page_confidence,
+                },
+            })
 
     if _cancel_flag.is_set():
         raise ValueError("Processing cancelled.")
 
-    # Confidence retry pass
+    # Confidence retry pass (smart: skips pages already above threshold)
     if min_confidence > 0:
-        send_event("progress", {
-            "current": 0,
-            "total": total,
-            "message": f"Retrying low-confidence words (< {min_confidence}%)...",
-        })
-        for i, (image, result) in enumerate(zip(images, ocr_results)):
-            if _cancel_flag.is_set():
-                raise ValueError("Processing cancelled.")
-
-            old_conf = result.page_confidence
-            improved = retry_low_confidence_words(
-                image, result, lang=lang, min_confidence=min_confidence,
-            )
-            ocr_results[i] = improved
-            new_conf = improved.page_confidence
-            improved_count = sum(
-                1 for old_w, new_w in zip(result.words, improved.words)
-                if new_w.confidence > old_w.confidence
-            )
-
+        pages_needing_retry = [
+            i for i, r in enumerate(ocr_results)
+            if r.page_confidence < min_confidence
+        ]
+        if pages_needing_retry:
             send_event("progress", {
-                "current": i + 1,
-                "total": total,
-                "message": f"Retry page {i + 1}/{total}: {improved_count} words improved, "
-                           f"confidence {old_conf:.1f}% → {new_conf:.1f}%",
+                "current": 0,
+                "total": len(pages_needing_retry),
+                "message": f"Retrying {len(pages_needing_retry)}/{total} pages "
+                           f"(< {min_confidence}% confidence)...",
+            })
+            for done, i in enumerate(pages_needing_retry):
+                if _cancel_flag.is_set():
+                    raise ValueError("Processing cancelled.")
+
+                result = ocr_results[i]
+                old_conf = result.page_confidence
+                improved = retry_low_confidence_words(
+                    images[i], result, lang=lang, min_confidence=min_confidence,
+                )
+                ocr_results[i] = improved
+                new_conf = improved.page_confidence
+                improved_count = sum(
+                    1 for old_w, new_w in zip(result.words, improved.words)
+                    if new_w.confidence > old_w.confidence
+                )
+
+                send_event("progress", {
+                    "current": done + 1,
+                    "total": len(pages_needing_retry),
+                    "message": f"Retry page {i + 1}: {improved_count} words improved, "
+                               f"{old_conf:.1f}% → {new_conf:.1f}%",
+                })
+        else:
+            send_event("progress", {
+                "current": total, "total": total,
+                "message": f"All pages above {min_confidence}% — skipping retry",
             })
 
     # Parse optional page labels
@@ -449,6 +516,98 @@ def handle_preview_preprocess(params: dict) -> dict:
     }
 
 
+def handle_detect_toc(params: dict) -> dict:
+    """Detect TOC entries from OCR results by analyzing text patterns.
+
+    Looks for:
+    1. Lines matching "Title ... PageNum" pattern (dots/spaces + number)
+    2. Large/prominent text blocks at page starts (headings)
+    3. Roman/Arabic numeral section headers (I., II., 1., 2., Chapter X, etc.)
+    """
+    import re
+
+    import pytesseract
+    from pytesseract import Output
+
+    from .image_handler import load_images
+
+    input_path = params["input"]
+    dpi = params.get("dpi", 200)
+    lang = params.get("lang", "grc+lat+eng")
+    max_pages = params.get("max_pages", 0)  # 0 = scan all pages
+
+    images = load_images(input_path, dpi=dpi)
+    total = len(images)
+    if max_pages > 0:
+        total = min(total, max_pages)
+
+    toc_entries = []
+
+    # Pattern: "Title text ... 123" or "Title text    123"
+    toc_line_re = re.compile(
+        r'^(.+?)[\s.…·\-_]{3,}(\d{1,4})\s*$'
+    )
+    # Heading patterns: "Chapter 1", "BOOK II", "I.", "§1", etc.
+    heading_re = re.compile(
+        r'^(?:'
+        r'(?:CHAPTER|Chapter|BOOK|Book|PART|Part|SECTION|Section|LIBER|Liber)\s+[\dIVXLCDMivxlcdm]+\.?'
+        r'|[IVXLCDM]+\.\s'
+        r'|\d+\.\s+[A-Z\u0370-\u03FF]'
+        r'|§\s*\d+'
+        r')',
+    )
+
+    for page_idx in range(total):
+        img = images[page_idx]
+        text = pytesseract.image_to_string(img, lang=lang)
+
+        lines = text.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Check TOC-style line: "Title ... page_number"
+            m = toc_line_re.match(line)
+            if m:
+                title = m.group(1).strip()
+                page_num = int(m.group(2))
+                if title and len(title) > 1 and page_num > 0:
+                    toc_entries.append({
+                        "title": title,
+                        "page": page_num,
+                        "level": 0,
+                        "source": "toc_page",
+                        "found_on_page": page_idx + 1,
+                    })
+                continue
+
+            # Check heading pattern (only first few lines of each page)
+            line_idx = lines.index(line) if line in lines else 999
+            if line_idx < 5 and heading_re.match(line):
+                toc_entries.append({
+                    "title": line.strip(),
+                    "page": page_idx + 1,
+                    "level": 0,
+                    "source": "heading",
+                    "found_on_page": page_idx + 1,
+                })
+
+    # Deduplicate by title
+    seen = set()
+    unique = []
+    for e in toc_entries:
+        key = (e["title"], e["page"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(e)
+
+    # Sort by page number
+    unique.sort(key=lambda e: e["page"])
+
+    return {"entries": unique, "total": len(unique)}
+
+
 def handle_detect_regions(params: dict) -> dict:
     """Detect text regions on a page using Tesseract block-level analysis."""
     import pytesseract
@@ -592,6 +751,7 @@ HANDLERS = {
     "load_preview": handle_load_preview,
     "preview_preprocess": handle_preview_preprocess,
     "detect_regions": handle_detect_regions,
+    "detect_toc": handle_detect_toc,
 }
 
 
