@@ -571,12 +571,28 @@ textarea.text-input { resize: vertical; line-height: 1.5; }
 .preview-toggles {
   display: flex;
   gap: 16px;
+  align-items: center;
   margin-top: 12px;
   flex-shrink: 0;
   padding: 8px 16px;
   background: var(--bg-card);
   border-radius: var(--radius);
   border: 1px solid var(--border);
+}
+
+.preview-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.preview-zoom-label {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  min-width: 36px;
+  text-align: center;
 }
 
 /* ── Modal ── */

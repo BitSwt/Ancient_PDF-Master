@@ -122,6 +122,10 @@ ipcMain.handle("preview-preprocess", async (_event, params) => {
   return pythonBridge.send("preview_preprocess", params);
 });
 
+ipcMain.handle("detect-regions", async (_event, params) => {
+  return pythonBridge.send("detect_regions", params);
+});
+
 ipcMain.handle("open-file", async (_event, filePath) => {
   shell.openPath(filePath);
 });

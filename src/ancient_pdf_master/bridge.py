@@ -449,6 +449,138 @@ def handle_preview_preprocess(params: dict) -> dict:
     }
 
 
+def handle_detect_regions(params: dict) -> dict:
+    """Detect text regions on a page using Tesseract block-level analysis."""
+    import pytesseract
+    from pytesseract import Output
+
+    from .image_handler import load_images
+
+    input_path = params["input"]
+    page_index = params.get("page", 0)
+    dpi = params.get("dpi", 150)
+    lang = params.get("lang", "grc+lat+eng")
+    min_area_pct = params.get("min_area_pct", 0.5)  # minimum block area as % of page
+
+    images = load_images(input_path, dpi=dpi)
+    if page_index >= len(images):
+        raise ValueError(f"Page {page_index} out of range (total {len(images)})")
+
+    img = images[page_index]
+    w, h = img.size
+
+    # Run Tesseract to get block-level bounding boxes
+    data = pytesseract.image_to_data(img, lang=lang, output_type=Output.DICT)
+
+    # Group by block_num to get block-level regions
+    blocks: dict[int, dict] = {}
+    for i in range(len(data["text"])):
+        block_num = data["block_num"][i]
+        if block_num == 0:
+            continue
+
+        text = data["text"][i].strip()
+        conf = float(data["conf"][i])
+
+        # Only count entries with actual text
+        if not text or conf < 0:
+            continue
+
+        if block_num not in blocks:
+            blocks[block_num] = {
+                "x1": data["left"][i],
+                "y1": data["top"][i],
+                "x2": data["left"][i] + data["width"][i],
+                "y2": data["top"][i] + data["height"][i],
+                "word_count": 0,
+                "total_conf": 0.0,
+            }
+
+        b = blocks[block_num]
+        b["x1"] = min(b["x1"], data["left"][i])
+        b["y1"] = min(b["y1"], data["top"][i])
+        b["x2"] = max(b["x2"], data["left"][i] + data["width"][i])
+        b["y2"] = max(b["y2"], data["top"][i] + data["height"][i])
+        b["word_count"] += 1
+        b["total_conf"] += conf
+
+    # Convert to proportional coordinates and filter small noise blocks
+    min_area_px = (w * h) * (min_area_pct / 100.0)
+    regions = []
+    for block_num, b in sorted(blocks.items()):
+        bw = b["x2"] - b["x1"]
+        bh = b["y2"] - b["y1"]
+        if bw * bh < min_area_px:
+            continue
+        if b["word_count"] < 2:
+            continue
+
+        # Add padding (2% of page)
+        pad_x = int(w * 0.02)
+        pad_y = int(h * 0.02)
+        x1 = max(0, b["x1"] - pad_x)
+        y1 = max(0, b["y1"] - pad_y)
+        x2 = min(w, b["x2"] + pad_x)
+        y2 = min(h, b["y2"] + pad_y)
+
+        avg_conf = b["total_conf"] / b["word_count"] if b["word_count"] > 0 else 0
+
+        regions.append({
+            "x_start": round(x1 / w, 4),
+            "y_start": round(y1 / h, 4),
+            "x_end": round(x2 / w, 4),
+            "y_end": round(y2 / h, 4),
+            "word_count": b["word_count"],
+            "confidence": round(avg_conf, 1),
+        })
+
+    # Merge overlapping regions
+    regions = _merge_overlapping_regions(regions)
+
+    return {"page": page_index, "regions": regions, "total": len(regions)}
+
+
+def _merge_overlapping_regions(regions: list[dict]) -> list[dict]:
+    """Merge regions that overlap significantly."""
+    if len(regions) <= 1:
+        return regions
+
+    merged = True
+    while merged:
+        merged = False
+        new_regions = []
+        used = set()
+        for i in range(len(regions)):
+            if i in used:
+                continue
+            r = dict(regions[i])
+            for j in range(i + 1, len(regions)):
+                if j in used:
+                    continue
+                s = regions[j]
+                # Check overlap
+                ox1 = max(r["x_start"], s["x_start"])
+                oy1 = max(r["y_start"], s["y_start"])
+                ox2 = min(r["x_end"], s["x_end"])
+                oy2 = min(r["y_end"], s["y_end"])
+                if ox1 < ox2 and oy1 < oy2:
+                    # Merge
+                    r["x_start"] = min(r["x_start"], s["x_start"])
+                    r["y_start"] = min(r["y_start"], s["y_start"])
+                    r["x_end"] = max(r["x_end"], s["x_end"])
+                    r["y_end"] = max(r["y_end"], s["y_end"])
+                    r["word_count"] = r["word_count"] + s["word_count"]
+                    r["confidence"] = round(
+                        (r["confidence"] + s["confidence"]) / 2, 1
+                    )
+                    used.add(j)
+                    merged = True
+            new_regions.append(r)
+        regions = new_regions
+
+    return regions
+
+
 # ── Dispatcher ──
 
 HANDLERS = {
@@ -459,6 +591,7 @@ HANDLERS = {
     "split_bilingual": handle_split_bilingual,
     "load_preview": handle_load_preview,
     "preview_preprocess": handle_preview_preprocess,
+    "detect_regions": handle_detect_regions,
 }
 
 

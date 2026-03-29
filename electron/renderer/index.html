@@ -94,6 +94,8 @@
             <label class="settings-label" for="zone-preset">Page Layout</label>
             <select id="zone-preset" class="select-input">
               <option value="full_page">Full Page</option>
+              <option value="auto_detect">Auto Detect Text Regions</option>
+              <option value="body_only">Body Only (exclude margins)</option>
               <option value="left_margin">Left Margin</option>
               <option value="both_margins">Both Margins</option>
               <option value="custom">Custom Zones</option>
@@ -126,6 +128,21 @@
                 <span id="zone-margin-label" class="slider-label">12%</span>
               </div>
             </div>
+          </div>
+          <div id="zone-body-only" class="hidden">
+            <div class="settings-group">
+              <label class="settings-label">Exclude margin (%)</label>
+              <div class="slider-row">
+                <input type="range" id="zone-body-margin" min="3" max="25" value="10" class="slider-input">
+                <span id="zone-body-margin-label" class="slider-label">10%</span>
+              </div>
+            </div>
+            <div class="zone-hint">OCR only the body area — margins (headers, page numbers, notes) are excluded.</div>
+          </div>
+          <div id="zone-auto-detect" class="hidden">
+            <button id="btn-detect-regions" class="btn btn-secondary" style="width:100%; margin-bottom:8px;">Detect Text Regions</button>
+            <div class="zone-hint" id="detect-status"></div>
+            <div id="detected-region-list"></div>
           </div>
           <div id="zone-custom" class="hidden">
             <div id="zone-custom-entries"></div>
@@ -339,6 +356,12 @@
             <span class="toggle-track"></span>
             <span>Preprocessing</span>
           </label>
+          <span class="preview-zoom-controls">
+            <button class="btn-small" id="btn-zoom-out" title="Zoom out">−</button>
+            <span class="preview-zoom-label" id="zoom-label">100%</span>
+            <button class="btn-small" id="btn-zoom-in" title="Zoom in">+</button>
+            <button class="btn-small" id="btn-zoom-fit" title="Fit to view">Fit</button>
+          </span>
         </div>
       </div>
     </div><!-- /preview-panel -->
