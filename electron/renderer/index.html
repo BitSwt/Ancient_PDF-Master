@@ -322,9 +322,10 @@
           </h2>
           <div id="toc-settings" class="hidden">
             <div id="toc-entries"></div>
-            <div style="margin-top:8px; display:flex; gap:8px;">
-              <button id="btn-add-toc" class="btn-small">+ Add Entry</button>
-              <button id="btn-import-toc" class="btn-small">Import Text</button>
+            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="btn-detect-toc" class="btn btn-secondary" style="flex:1;">Auto Detect</button>
+              <button id="btn-add-toc" class="btn-small">+ Add</button>
+              <button id="btn-import-toc" class="btn-small">Import</button>
             </div>
             <div id="toc-import-area" class="hidden" style="margin-top:8px;">
               <textarea id="toc-import-text" class="text-input" rows="5" placeholder="Chapter 1 ... 5&#10;  Section 1.1 ... 8"></textarea>

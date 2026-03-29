@@ -1252,6 +1252,42 @@ function addTocEntry(title = "", page = 1, level = 0) {
   tocEntries.appendChild(row);
 }
 
+const btnDetectToc = document.getElementById("btn-detect-toc");
+
+btnDetectToc.addEventListener("click", async () => {
+  if (!inputPath.value) { log("[WARN] No file loaded", "warn"); return; }
+  btnDetectToc.disabled = true;
+  btnDetectToc.textContent = "Detecting...";
+  log("[INFO] Scanning pages for TOC entries...", "info");
+
+  try {
+    const lang = getSelectedLanguages();
+    const result = await window.api.detectToc({
+      input: inputPath.value,
+      dpi: 200,
+      lang,
+    });
+
+    if (result.entries.length === 0) {
+      log("[WARN] No TOC entries detected. Try importing manually.", "warn");
+    } else {
+      // Clear existing entries and add detected ones
+      tocEntries.innerHTML = "";
+      for (const e of result.entries) {
+        addTocEntry(e.title, e.page, e.level);
+      }
+      tocEnabled.checked = true;
+      tocSettings.classList.remove("hidden");
+      log(`[OK] Detected ${result.total} TOC entries`, "ok");
+    }
+  } catch (err) {
+    log(`[ERROR] TOC detection failed: ${err.message}`, "error");
+  } finally {
+    btnDetectToc.disabled = false;
+    btnDetectToc.textContent = "Auto Detect";
+  }
+});
+
 btnAddToc.addEventListener("click", () => addTocEntry());
 btnImportToc.addEventListener("click", () => tocImportArea.classList.toggle("hidden"));
 

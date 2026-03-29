@@ -81,18 +81,39 @@ def ocr_page(image: Image.Image, lang: str = "grc+lat+eng") -> OcrPageResult:
     )
 
 
+def _is_plausible_word(text: str) -> bool:
+    """Check if a word looks like valid text (not OCR garbage).
+
+    Words that are mostly alphanumeric/punctuation with consistent
+    character patterns are likely valid even at lower confidence.
+    """
+    import re
+    if not text or len(text) < 1:
+        return False
+    # Allow Greek, Latin, common punctuation, digits
+    # If >60% are "real" characters, consider it plausible
+    clean = re.sub(r'[\s]', '', text)
+    if not clean:
+        return False
+    alpha_count = sum(1 for c in clean if c.isalpha() or c.isdigit() or c in '.,;:!?\'"-()[]')
+    return (alpha_count / len(clean)) >= 0.6
+
+
 def retry_low_confidence_words(
     image: Image.Image,
     result: OcrPageResult,
     lang: str = "grc+lat+eng",
     min_confidence: float = 95.0,
     padding: int = 5,
+    max_retries_per_page: int = 30,
 ) -> OcrPageResult:
     """Re-OCR words below min_confidence with alternative PSM modes.
 
-    For each low-confidence word, crops the bounding box region from
-    the original image and re-runs OCR with PSM 7 (single line) and
-    PSM 8 (single word). Keeps the result with highest confidence.
+    Smart retry logic:
+    - Skip pages where average confidence is already >= min_confidence
+    - Skip words that look like plausible text (valid chars, >= 70% conf)
+    - Early exit per word once a good result is found
+    - Cap total retries per page to avoid slowdowns
 
     Args:
         image: Original page image.
@@ -100,22 +121,38 @@ def retry_low_confidence_words(
         lang: Language string.
         min_confidence: Retry words below this threshold.
         padding: Extra pixels around the crop region.
+        max_retries_per_page: Maximum words to retry per page.
 
     Returns:
         Updated OcrPageResult with improved word confidences.
     """
-    retry_psm_modes = [7, 8, 13]  # single line, single word, raw line
+    # Skip page entirely if already good enough
+    if result.page_confidence >= min_confidence:
+        return result
+
+    # Only retry words that are both low-confidence AND look like garbage
+    retry_psm_modes = [8, 7]  # single word first (faster), then single line
     improved_words = []
     retried = 0
-    improved_count = 0
 
     for word in result.words:
+        # Skip if above threshold
         if word.confidence >= min_confidence:
             improved_words.append(word)
             continue
 
+        # Skip if the word looks like valid text at reasonable confidence
+        if word.confidence >= 70.0 and _is_plausible_word(word.text):
+            improved_words.append(word)
+            continue
+
+        # Cap retries per page
+        if retried >= max_retries_per_page:
+            improved_words.append(word)
+            continue
+
         retried += 1
-        best_word = word  # keep original as fallback
+        best_word = word
 
         # Crop the word region with padding
         x1 = max(0, word.x - padding)
@@ -129,7 +166,6 @@ def retry_low_confidence_words(
 
         crop = image.crop((x1, y1, x2, y2))
 
-        # Try each PSM mode
         for psm in retry_psm_modes:
             try:
                 config = f"--psm {psm}"
@@ -140,21 +176,18 @@ def retry_low_confidence_words(
                 for j in range(len(data["text"])):
                     text = data["text"][j].strip()
                     conf = float(data["conf"][j])
-
                     if text and conf > best_word.confidence:
                         best_word = OcrWord(
-                            text=text,
-                            x=word.x,
-                            y=word.y,
-                            width=word.width,
-                            height=word.height,
+                            text=text, x=word.x, y=word.y,
+                            width=word.width, height=word.height,
                             confidence=conf,
                         )
             except Exception:
                 continue
 
-        if best_word.confidence > word.confidence:
-            improved_count += 1
+            # Early exit: if we got a good result, no need to try more PSM modes
+            if best_word.confidence >= min_confidence:
+                break
 
         improved_words.append(best_word)
 
