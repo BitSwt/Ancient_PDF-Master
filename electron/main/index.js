@@ -19,6 +19,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   });
 
@@ -119,6 +120,10 @@ ipcMain.handle("load-preview", async (_event, params) => {
 
 ipcMain.handle("preview-preprocess", async (_event, params) => {
   return pythonBridge.send("preview_preprocess", params);
+});
+
+ipcMain.handle("detect-regions", async (_event, params) => {
+  return pythonBridge.send("detect_regions", params);
 });
 
 ipcMain.handle("open-file", async (_event, filePath) => {

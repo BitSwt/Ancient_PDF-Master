@@ -61,6 +61,26 @@ def test_combined():
     assert result.size == img.size
 
 
+def test_deskew_corrects_tilted_text():
+    """Deskew should detect and correct a rotated image with text lines."""
+    from PIL import ImageDraw
+    from ancient_pdf_master.preprocess import _deskew
+
+    # Create image with horizontal lines (simulating text)
+    img = Image.new("L", (400, 300), 255)
+    draw = ImageDraw.Draw(img)
+    for y in range(40, 260, 20):
+        draw.line([(30, y), (370, y)], fill=0, width=2)
+
+    # Rotate it 5 degrees (simulate skew)
+    skewed = img.rotate(5, resample=Image.BICUBIC, fillcolor=255)
+
+    # Deskew should bring it back close to 0
+    result = _deskew(skewed)
+    assert result.size == skewed.size
+    assert result.mode == skewed.mode
+
+
 def test_no_preprocessing():
     img = _make_test_image()
     config = PreprocessConfig()

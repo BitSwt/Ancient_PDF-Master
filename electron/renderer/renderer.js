@@ -54,7 +54,9 @@ const tocImportArea = document.getElementById("toc-import-area");
 const tocImportText = document.getElementById("toc-import-text");
 const btnParseToc = document.getElementById("btn-parse-toc");
 
+const autoDeskew = document.getElementById("auto-deskew");
 const confidenceRetry = document.getElementById("confidence-retry");
+const pageRangeInput = document.getElementById("page-range");
 const zonePreset = document.getElementById("zone-preset");
 const zoneHint = document.getElementById("zone-hint");
 const zoneParams = document.getElementById("zone-params");
@@ -62,6 +64,13 @@ const zoneCustom = document.getElementById("zone-custom");
 const zoneMarginWidth = document.getElementById("zone-margin-width");
 const zoneMarginLabel = document.getElementById("zone-margin-label");
 const zoneCustomEntries = document.getElementById("zone-custom-entries");
+const zoneAutoDetect = document.getElementById("zone-auto-detect");
+const btnDetectRegions = document.getElementById("btn-detect-regions");
+const detectStatus = document.getElementById("detect-status");
+const detectedRegionList = document.getElementById("detected-region-list");
+const zoneBodyOnly = document.getElementById("zone-body-only");
+const zoneBodyMargin = document.getElementById("zone-body-margin");
+const zoneBodyMarginLabel = document.getElementById("zone-body-margin-label");
 const btnAddZone = document.getElementById("btn-add-zone");
 
 // Preprocessing elements
@@ -88,6 +97,12 @@ const btnNextPage = document.getElementById("btn-next-page");
 const pvShowZones = document.getElementById("pv-show-zones");
 const pvShowPreprocess = document.getElementById("pv-show-preprocess");
 
+// Zoom controls
+const btnZoomIn = document.getElementById("btn-zoom-in");
+const btnZoomOut = document.getElementById("btn-zoom-out");
+const btnZoomFit = document.getElementById("btn-zoom-fit");
+const zoomLabel = document.getElementById("zoom-label");
+
 // Drop zone
 const dropZone = document.getElementById("drop-zone");
 const dropArea = document.getElementById("drop-area");
@@ -99,6 +114,11 @@ let removeProgressListener = null;
 let previewPages = [];
 let currentPage = 0;
 let totalPages = 0;
+
+// Detected text regions (per page): { pageIndex: [{x_start, y_start, x_end, y_end, ...}] }
+let detectedRegions = {};
+// Currently selected region index for resizing
+let regionDragState = null;
 
 // ── Logging ──
 
@@ -305,50 +325,129 @@ async function loadPreprocessedPage(index) {
   }
 }
 
+// ── Interactive Margin Drag State ──
+let marginDragState = null; // { edge: "left"|"right", startX, startMargin }
+const DRAG_HANDLE_WIDTH = 8; // px hit area for drag handles
+
+function getMarginZones() {
+  const preset = zonePreset.value;
+  const mw = parseInt(zoneMarginWidth.value) / 100;
+  if (preset === "left_margin") {
+    return [
+      { x: 0, y: 0, w: mw, h: 1, label: "Margin" },
+      { x: mw, y: 0, w: 1 - mw, h: 1, label: "Body" },
+    ];
+  } else if (preset === "both_margins") {
+    // Symmetric: odd pages have left margin at left, even pages mirror
+    const isEvenPage = (currentPage % 2 === 1); // 0-indexed
+    if (isEvenPage) {
+      return [
+        { x: 0, y: 0, w: 1 - mw, h: 1, label: "Body" },
+        { x: 1 - mw, y: 0, w: mw, h: 1, label: "Margin" },
+      ];
+    }
+    return [
+      { x: 0, y: 0, w: mw, h: 1, label: "L.Margin" },
+      { x: mw, y: 0, w: 1 - 2 * mw, h: 1, label: "Body" },
+      { x: 1 - mw, y: 0, w: mw, h: 1, label: "R.Margin" },
+    ];
+  }
+  return null;
+}
+
+function getDraggableEdges() {
+  const preset = zonePreset.value;
+  const mw = parseInt(zoneMarginWidth.value) / 100;
+  const w = previewOverlay.width;
+  if (preset === "left_margin") {
+    return [{ edge: "right-of-left", xFrac: mw }];
+  } else if (preset === "both_margins") {
+    const isEvenPage = (currentPage % 2 === 1);
+    if (isEvenPage) {
+      return [{ edge: "left-of-right", xFrac: 1 - mw }];
+    }
+    return [
+      { edge: "right-of-left", xFrac: mw },
+      { edge: "left-of-right", xFrac: 1 - mw },
+    ];
+  }
+  return [];
+}
+
 function drawZoneOverlay() {
-  const canvas = previewOverlay;
+  const cvs = previewOverlay;
   const img = previewImage;
 
-  canvas.width = img.clientWidth;
-  canvas.height = img.clientHeight;
-  canvas.style.width = img.clientWidth + "px";
-  canvas.style.height = img.clientHeight + "px";
+  cvs.width = img.clientWidth;
+  cvs.height = img.clientHeight;
+  cvs.style.width = img.clientWidth + "px";
+  cvs.style.height = img.clientHeight + "px";
 
-  // Position overlay on top of image
   const wrapper = document.getElementById("preview-image-wrapper");
   const imgRect = img.getBoundingClientRect();
   const wrapperRect = wrapper.getBoundingClientRect();
-  canvas.style.left = (imgRect.left - wrapperRect.left) + "px";
-  canvas.style.top = (imgRect.top - wrapperRect.top) + "px";
+  cvs.style.left = (imgRect.left - wrapperRect.left) + "px";
+  cvs.style.top = (imgRect.top - wrapperRect.top) + "px";
 
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const ctx = cvs.getContext("2d");
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
 
   if (!pvShowZones.checked) return;
 
   const preset = zonePreset.value;
   if (preset === "full_page") return;
 
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = cvs.width;
+  const h = cvs.height;
   const colors = ["rgba(52, 208, 88, 0.2)", "rgba(88, 166, 255, 0.2)", "rgba(248, 81, 73, 0.2)"];
   const borders = ["rgba(52, 208, 88, 0.6)", "rgba(88, 166, 255, 0.6)", "rgba(248, 81, 73, 0.6)"];
 
   let zones = [];
+  if (preset === "left_margin" || preset === "both_margins") {
+    zones = getMarginZones() || [];
+  } else if (preset === "body_only") {
+    const m = parseInt(zoneBodyMargin.value) / 100;
+    zones = [
+      { x: m, y: m, w: 1 - 2 * m, h: 1 - 2 * m, label: "Body" },
+    ];
+    // Dim the excluded margins
+    ctx.fillStyle = "rgba(248, 81, 73, 0.15)";
+    ctx.fillRect(0, 0, w, m * h);                     // top
+    ctx.fillRect(0, (1 - m) * h, w, m * h);           // bottom
+    ctx.fillRect(0, m * h, m * w, (1 - 2 * m) * h);   // left
+    ctx.fillRect((1 - m) * w, m * h, m * w, (1 - 2 * m) * h); // right
+  } else if (preset === "auto_detect") {
+    const regions = detectedRegions[currentPage] || [];
+    regions.forEach((r, i) => {
+      const ci = i % colors.length;
+      const rx = r.x_start * w;
+      const ry = r.y_start * h;
+      const rw = (r.x_end - r.x_start) * w;
+      const rh = (r.y_end - r.y_start) * h;
 
-  if (preset === "left_margin") {
-    const mw = parseInt(zoneMarginWidth.value) / 100;
-    zones = [
-      { x: 0, y: 0, w: mw, h: 1, label: "Margin" },
-      { x: mw, y: 0, w: 1 - mw, h: 1, label: "Body" },
-    ];
-  } else if (preset === "both_margins") {
-    const mw = parseInt(zoneMarginWidth.value) / 100;
-    zones = [
-      { x: 0, y: 0, w: mw, h: 1, label: "L.Margin" },
-      { x: mw, y: 0, w: 1 - 2 * mw, h: 1, label: "Body" },
-      { x: 1 - mw, y: 0, w: mw, h: 1, label: "R.Margin" },
-    ];
+      ctx.fillStyle = colors[ci];
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = borders[ci];
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rx, ry, rw, rh);
+
+      // Label
+      ctx.fillStyle = borders[ci];
+      ctx.font = "11px -apple-system, sans-serif";
+      ctx.fillText(`R${i + 1}`, rx + 4, ry + 14);
+
+      // Draw resize handles (small squares at corners and edges)
+      const handleSize = 6;
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      // Corners
+      for (const [hx, hy] of [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]]) {
+        ctx.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+        ctx.strokeStyle = borders[ci];
+        ctx.lineWidth = 1;
+        ctx.strokeRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+      }
+    });
+    return; // Skip margin-specific drawing below
   } else if (preset === "custom") {
     const rows = zoneCustomEntries.querySelectorAll(".zone-row");
     rows.forEach((row) => {
@@ -369,13 +468,233 @@ function drawZoneOverlay() {
     ctx.strokeStyle = borders[ci];
     ctx.lineWidth = 2;
     ctx.strokeRect(zone.x * w, zone.y * h, zone.w * w, zone.h * h);
-
-    // Label
     ctx.fillStyle = borders[ci];
     ctx.font = "11px -apple-system, sans-serif";
     ctx.fillText(zone.label, zone.x * w + 4, zone.y * h + 14);
   });
+
+  // Draw drag handles on margin edges (for margin presets)
+  const edges = getDraggableEdges();
+  edges.forEach((e) => {
+    const xPx = e.xFrac * w;
+    ctx.fillStyle = "rgba(52, 208, 88, 0.7)";
+    ctx.fillRect(xPx - 2, h * 0.35, 4, h * 0.3);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("⇔", xPx, h * 0.5 + 5);
+    ctx.textAlign = "left";
+  });
 }
+
+// ── Margin Drag Interaction ──
+
+previewOverlay.addEventListener("mousedown", (e) => {
+  const preset = zonePreset.value;
+  if (!pvShowZones.checked) return;
+
+  const rect = previewOverlay.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  const w = previewOverlay.width;
+  const h = previewOverlay.height;
+
+  // Auto-detect: check region handles
+  if (preset === "auto_detect") {
+    const regions = detectedRegions[currentPage] || [];
+    const HANDLE = 10;
+    for (let i = 0; i < regions.length; i++) {
+      const r = regions[i];
+      const rx1 = r.x_start * w, ry1 = r.y_start * h;
+      const rx2 = r.x_end * w, ry2 = r.y_end * h;
+
+      // Check corners and edges for resize
+      const handles = [
+        { side: "nw", x: rx1, y: ry1 }, { side: "ne", x: rx2, y: ry1 },
+        { side: "sw", x: rx1, y: ry2 }, { side: "se", x: rx2, y: ry2 },
+        { side: "n", x: (rx1 + rx2) / 2, y: ry1 }, { side: "s", x: (rx1 + rx2) / 2, y: ry2 },
+        { side: "w", x: rx1, y: (ry1 + ry2) / 2 }, { side: "e", x: rx2, y: (ry1 + ry2) / 2 },
+      ];
+
+      for (const handle of handles) {
+        if (Math.abs(mouseX - handle.x) < HANDLE && Math.abs(mouseY - handle.y) < HANDLE) {
+          regionDragState = { index: i, side: handle.side, origRegion: { ...r } };
+          e.preventDefault();
+          return;
+        }
+      }
+
+      // Check if inside the box → move the whole region
+      if (mouseX >= rx1 && mouseX <= rx2 && mouseY >= ry1 && mouseY <= ry2) {
+        regionDragState = { index: i, side: "move", origRegion: { ...r }, startX: mouseX, startY: mouseY };
+        previewOverlay.style.cursor = "move";
+        e.preventDefault();
+        return;
+      }
+    }
+    return;
+  }
+
+  // Body only: drag margin edge
+  if (preset === "body_only") {
+    const m = parseInt(zoneBodyMargin.value) / 100;
+    const edgesBody = [
+      { edge: "left", pos: m * w }, { edge: "right", pos: (1 - m) * w },
+      { edge: "top", pos: m * h }, { edge: "bottom", pos: (1 - m) * h },
+    ];
+    for (const eb of edgesBody) {
+      const isHoriz = (eb.edge === "top" || eb.edge === "bottom");
+      const dist = isHoriz ? Math.abs(mouseY - eb.pos) : Math.abs(mouseX - eb.pos);
+      if (dist < DRAG_HANDLE_WIDTH) {
+        marginDragState = { edge: "body-" + eb.edge, startMargin: parseInt(zoneBodyMargin.value) };
+        previewOverlay.style.cursor = isHoriz ? "row-resize" : "col-resize";
+        e.preventDefault();
+        return;
+      }
+    }
+    return;
+  }
+
+  // Margin presets
+  if (preset !== "left_margin" && preset !== "both_margins") return;
+
+  const edges = getDraggableEdges();
+  for (const edge of edges) {
+    const edgePx = edge.xFrac * w;
+    if (Math.abs(mouseX - edgePx) < DRAG_HANDLE_WIDTH) {
+      marginDragState = { edge: edge.edge, startX: mouseX, startMargin: parseInt(zoneMarginWidth.value) };
+      previewOverlay.style.cursor = "col-resize";
+      e.preventDefault();
+      return;
+    }
+  }
+});
+
+document.addEventListener("mousemove", (e) => {
+  const rect = previewOverlay.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  const w = previewOverlay.width;
+  const h = previewOverlay.height;
+
+  // Handle region drag (auto_detect)
+  if (regionDragState) {
+    const regions = detectedRegions[currentPage] || [];
+    const r = regions[regionDragState.index];
+    if (!r) return;
+
+    const orig = regionDragState.origRegion;
+    const fracX = mouseX / w;
+    const fracY = mouseY / h;
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+
+    switch (regionDragState.side) {
+      case "nw": r.x_start = clamp(fracX); r.y_start = clamp(fracY); break;
+      case "ne": r.x_end = clamp(fracX); r.y_start = clamp(fracY); break;
+      case "sw": r.x_start = clamp(fracX); r.y_end = clamp(fracY); break;
+      case "se": r.x_end = clamp(fracX); r.y_end = clamp(fracY); break;
+      case "n": r.y_start = clamp(fracY); break;
+      case "s": r.y_end = clamp(fracY); break;
+      case "w": r.x_start = clamp(fracX); break;
+      case "e": r.x_end = clamp(fracX); break;
+      case "move": {
+        const dx = (mouseX - regionDragState.startX) / w;
+        const dy = (mouseY - regionDragState.startY) / h;
+        const rw = orig.x_end - orig.x_start;
+        const rh = orig.y_end - orig.y_start;
+        r.x_start = clamp(orig.x_start + dx);
+        r.y_start = clamp(orig.y_start + dy);
+        r.x_end = clamp(r.x_start + rw);
+        r.y_end = clamp(r.y_start + rh);
+        break;
+      }
+    }
+
+    // Ensure min size
+    if (r.x_end < r.x_start + 0.02) r.x_end = r.x_start + 0.02;
+    if (r.y_end < r.y_start + 0.02) r.y_end = r.y_start + 0.02;
+
+    drawZoneOverlay();
+    renderRegionList(currentPage);
+    return;
+  }
+
+  // Handle margin/body drag
+  if (marginDragState) {
+    if (marginDragState.edge.startsWith("body-")) {
+      const side = marginDragState.edge.replace("body-", "");
+      let newM;
+      if (side === "left") newM = mouseX / w;
+      else if (side === "right") newM = 1 - mouseX / w;
+      else if (side === "top") newM = mouseY / h;
+      else newM = 1 - mouseY / h;
+      const pct = Math.round(Math.max(3, Math.min(25, newM * 100)));
+      zoneBodyMargin.value = pct;
+      zoneBodyMarginLabel.textContent = `${pct}%`;
+      drawZoneOverlay();
+      return;
+    }
+
+    let newMarginFrac;
+    if (marginDragState.edge === "right-of-left") {
+      newMarginFrac = mouseX / w;
+    } else {
+      newMarginFrac = 1 - (mouseX / w);
+    }
+    const newMarginPct = Math.round(Math.max(5, Math.min(40, newMarginFrac * 100)));
+    zoneMarginWidth.value = newMarginPct;
+    zoneMarginLabel.textContent = `${newMarginPct}%`;
+    drawZoneOverlay();
+    return;
+  }
+
+  // Hover cursor updates
+  const preset = zonePreset.value;
+  if (!pvShowZones.checked) return;
+
+  if (preset === "auto_detect") {
+    const regions = detectedRegions[currentPage] || [];
+    const HANDLE = 10;
+    let cursor = "default";
+    for (const r of regions) {
+      const rx1 = r.x_start * w, ry1 = r.y_start * h;
+      const rx2 = r.x_end * w, ry2 = r.y_end * h;
+      // Check corners
+      if (Math.abs(mouseX - rx1) < HANDLE && Math.abs(mouseY - ry1) < HANDLE) { cursor = "nw-resize"; break; }
+      if (Math.abs(mouseX - rx2) < HANDLE && Math.abs(mouseY - ry1) < HANDLE) { cursor = "ne-resize"; break; }
+      if (Math.abs(mouseX - rx1) < HANDLE && Math.abs(mouseY - ry2) < HANDLE) { cursor = "sw-resize"; break; }
+      if (Math.abs(mouseX - rx2) < HANDLE && Math.abs(mouseY - ry2) < HANDLE) { cursor = "se-resize"; break; }
+      // Edges
+      if (mouseX >= rx1 && mouseX <= rx2 && Math.abs(mouseY - ry1) < HANDLE) { cursor = "n-resize"; break; }
+      if (mouseX >= rx1 && mouseX <= rx2 && Math.abs(mouseY - ry2) < HANDLE) { cursor = "s-resize"; break; }
+      if (mouseY >= ry1 && mouseY <= ry2 && Math.abs(mouseX - rx1) < HANDLE) { cursor = "w-resize"; break; }
+      if (mouseY >= ry1 && mouseY <= ry2 && Math.abs(mouseX - rx2) < HANDLE) { cursor = "e-resize"; break; }
+      // Inside
+      if (mouseX >= rx1 && mouseX <= rx2 && mouseY >= ry1 && mouseY <= ry2) { cursor = "move"; break; }
+    }
+    previewOverlay.style.cursor = cursor;
+  } else if (preset === "left_margin" || preset === "both_margins") {
+    const edges = getDraggableEdges();
+    let onEdge = false;
+    for (const edge of edges) {
+      if (Math.abs(mouseX - edge.xFrac * w) < DRAG_HANDLE_WIDTH) { onEdge = true; break; }
+    }
+    previewOverlay.style.cursor = onEdge ? "col-resize" : "default";
+  } else {
+    previewOverlay.style.cursor = "default";
+  }
+});
+
+document.addEventListener("mouseup", () => {
+  if (marginDragState) {
+    marginDragState = null;
+    previewOverlay.style.cursor = "default";
+  }
+  if (regionDragState) {
+    regionDragState = null;
+    previewOverlay.style.cursor = "default";
+  }
+});
 
 btnPrevPage.addEventListener("click", () => showPage(currentPage - 1));
 btnNextPage.addEventListener("click", () => showPage(currentPage + 1));
@@ -388,12 +707,16 @@ zonePreset.addEventListener("change", () => {
   const val = zonePreset.value;
   zoneHint.textContent = {
     full_page: "Standard single-pass OCR.",
+    auto_detect: "Automatically detect text regions. Click 'Detect' then adjust boxes.",
+    body_only: "Exclude margins — OCR only the central body text area.",
     left_margin: "Left margin + body. For Loeb, OCT, Teubner editions.",
     both_margins: "Left margin + body + right margin.",
     custom: "Define custom zones. PSM 11 for margins, PSM 3 for body.",
   }[val] || "";
-  zoneParams.classList.toggle("hidden", val === "full_page" || val === "custom");
+  zoneParams.classList.toggle("hidden", val !== "left_margin" && val !== "both_margins");
   zoneCustom.classList.toggle("hidden", val !== "custom");
+  zoneAutoDetect.classList.toggle("hidden", val !== "auto_detect");
+  zoneBodyOnly.classList.toggle("hidden", val !== "body_only");
   drawZoneOverlay();
 });
 
@@ -401,6 +724,65 @@ zoneMarginWidth.addEventListener("input", () => {
   zoneMarginLabel.textContent = `${zoneMarginWidth.value}%`;
   drawZoneOverlay();
 });
+
+zoneBodyMargin.addEventListener("input", () => {
+  zoneBodyMarginLabel.textContent = `${zoneBodyMargin.value}%`;
+  drawZoneOverlay();
+});
+
+// ── Auto Detect Regions ──
+
+btnDetectRegions.addEventListener("click", async () => {
+  if (!inputPath.value) { log("[WARN] No file loaded", "warn"); return; }
+  btnDetectRegions.disabled = true;
+  btnDetectRegions.textContent = "Detecting...";
+  detectStatus.textContent = "";
+
+  try {
+    const lang = getSelectedLanguages();
+    const result = await window.api.detectRegions({
+      input: inputPath.value,
+      page: currentPage,
+      dpi: 150,
+      lang,
+    });
+
+    detectedRegions[currentPage] = result.regions;
+    detectStatus.textContent = `Found ${result.total} text region(s). Drag edges to adjust.`;
+    renderRegionList(currentPage);
+    drawZoneOverlay();
+    log(`[OK] Detected ${result.total} text regions on page ${currentPage + 1}`, "ok");
+  } catch (err) {
+    log(`[ERROR] Region detection failed: ${err.message}`, "error");
+    detectStatus.textContent = "Detection failed.";
+  } finally {
+    btnDetectRegions.disabled = false;
+    btnDetectRegions.textContent = "Detect Text Regions";
+  }
+});
+
+function renderRegionList(pageIndex) {
+  detectedRegionList.innerHTML = "";
+  const regions = detectedRegions[pageIndex] || [];
+  regions.forEach((r, i) => {
+    const row = document.createElement("div");
+    row.className = "zone-row";
+    row.style.fontSize = "11px";
+    const pct = (v) => Math.round(v * 100);
+    row.innerHTML = `
+      <span style="color:var(--green);min-width:18px;">R${i + 1}</span>
+      <span style="color:var(--text-muted);">${pct(r.x_start)}%-${pct(r.x_end)}% × ${pct(r.y_start)}%-${pct(r.y_end)}%</span>
+      <span style="color:var(--text-muted);margin-left:auto;">${r.word_count}w</span>
+      <button class="zone-delete" data-idx="${i}">&times;</button>
+    `;
+    row.querySelector(".zone-delete").addEventListener("click", () => {
+      regions.splice(i, 1);
+      renderRegionList(pageIndex);
+      drawZoneOverlay();
+    });
+    detectedRegionList.appendChild(row);
+  });
+}
 
 // ── Toggle Sections ──
 
@@ -490,6 +872,31 @@ function getSelectedLanguages() {
 function getZoneConfig() {
   const preset = zonePreset.value;
   if (preset === "full_page") return {};
+  if (preset === "auto_detect") {
+    // Collect all detected regions across pages as custom zones
+    const allRegions = [];
+    for (const pageIdx in detectedRegions) {
+      for (const r of detectedRegions[pageIdx]) {
+        allRegions.push({
+          type: "body",
+          x_start: r.x_start,
+          y_start: r.y_start,
+          x_end: r.x_end,
+          y_end: r.y_end,
+          psm: 3,
+        });
+      }
+    }
+    if (allRegions.length === 0) return {}; // fallback to full page
+    return { zone_preset: "custom", zones: allRegions };
+  }
+  if (preset === "body_only") {
+    const m = parseInt(zoneBodyMargin.value) / 100;
+    return {
+      zone_preset: "custom",
+      zones: [{ type: "body", x_start: m, y_start: m, x_end: 1 - m, y_end: 1 - m, psm: 3 }],
+    };
+  }
   if (preset === "custom") {
     const rows = zoneCustomEntries.querySelectorAll(".zone-row");
     const zones = [];
@@ -679,7 +1086,9 @@ btnStart.addEventListener("click", async () => {
       modalOverlay.classList.remove("hidden");
     } else {
       const params = { input, output, lang, dpi };
+      if (autoDeskew.checked) params.auto_deskew = true;
       if (confidenceRetry.checked) params.min_confidence = 95.0;
+      if (pageRangeInput.value.trim()) params.page_range = pageRangeInput.value.trim();
       Object.assign(params, getZoneConfig());
       const preprocess = getPreprocessConfig();
       if (preprocess) params.preprocess = preprocess;
@@ -765,6 +1174,44 @@ window.api.onUpdaterStatus((data) => {
 btnUpdateDownload.addEventListener("click", async () => { btnUpdateDownload.disabled = true; btnUpdateDownload.textContent = "..."; await window.api.updaterDownload(); });
 btnUpdateInstall.addEventListener("click", async () => { await window.api.updaterInstall(); });
 btnUpdateDismiss.addEventListener("click", () => { updateBanner.classList.add("hidden"); });
+
+// ── Zoom ──
+
+let zoomLevel = 1.0;
+
+function applyZoom() {
+  previewImage.style.maxWidth = zoomLevel === 1.0 ? "100%" : "none";
+  previewImage.style.maxHeight = zoomLevel === 1.0 ? "100%" : "none";
+  previewImage.style.width = zoomLevel === 1.0 ? "" : `${zoomLevel * 100}%`;
+  zoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
+  // Redraw overlay at new zoom size
+  setTimeout(drawZoneOverlay, 50);
+}
+
+btnZoomIn.addEventListener("click", () => {
+  zoomLevel = Math.min(5.0, zoomLevel + 0.25);
+  applyZoom();
+});
+
+btnZoomOut.addEventListener("click", () => {
+  zoomLevel = Math.max(0.25, zoomLevel - 0.25);
+  applyZoom();
+});
+
+btnZoomFit.addEventListener("click", () => {
+  zoomLevel = 1.0;
+  applyZoom();
+});
+
+// Mouse wheel zoom on preview
+previewOverlay.addEventListener("wheel", (e) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    zoomLevel = Math.max(0.25, Math.min(5.0, zoomLevel + delta));
+    applyZoom();
+  }
+}, { passive: false });
 
 // ── Window resize → redraw overlay ──
 
