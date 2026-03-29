@@ -16,6 +16,15 @@ contextBridge.exposeInMainWorld("api", {
   checkTesseract: () => ipcRenderer.invoke("check-tesseract"),
   getLanguages: () => ipcRenderer.invoke("get-languages"),
 
+  // Training
+  checkTrainingTools: () => ipcRenderer.invoke("check-training-tools"),
+  listCustomModels: () => ipcRenderer.invoke("list-custom-models"),
+  deleteCustomModel: (params) => ipcRenderer.invoke("delete-custom-model", params),
+  validateTrainingData: (params) => ipcRenderer.invoke("validate-training-data", params),
+  generateLineImages: (params) => ipcRenderer.invoke("generate-line-images", params),
+  startTraining: (params) => ipcRenderer.invoke("start-training", params),
+  selectTrainingDir: () => ipcRenderer.invoke("select-training-dir"),
+
   // OCR
   startOcr: (params) => ipcRenderer.invoke("start-ocr", params),
   cancelOcr: () => ipcRenderer.invoke("cancel-ocr"),

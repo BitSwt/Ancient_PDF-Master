@@ -1143,6 +1143,10 @@ function getSelectedLanguages() {
   if (langGrc.checked) langs.push("grc");
   if (langLat.checked) langs.push("lat");
   if (langEng.checked) langs.push("eng");
+  // Include custom-trained models
+  document.querySelectorAll(".custom-lang-cb:checked").forEach((cb) => {
+    if (!langs.includes(cb.value)) langs.push(cb.value);
+  });
   return langs.length > 0 ? langs.join("+") : "eng";
 }
 
@@ -1536,6 +1540,205 @@ previewOverlay.addEventListener("wheel", (e) => {
 
 window.addEventListener("resize", drawZoneOverlay);
 
+// ── Model Training ──
+
+const trainingEnabled = document.getElementById("training-enabled");
+const trainingSettings = document.getElementById("training-settings");
+const trainBaseLang = document.getElementById("train-base-lang");
+const trainModelName = document.getElementById("train-model-name");
+const trainDataDir = document.getElementById("train-data-dir");
+const trainDataStatus = document.getElementById("train-data-status");
+const trainIterations = document.getElementById("train-iterations");
+const trainIterationsLabel = document.getElementById("train-iterations-label");
+const trainLearningRate = document.getElementById("train-learning-rate");
+const btnTrainBrowse = document.getElementById("btn-train-browse");
+const btnStartTraining = document.getElementById("btn-start-training");
+const trainProgress = document.getElementById("train-progress");
+const trainProgressBar = document.getElementById("train-progress-bar");
+const trainProgressText = document.getElementById("train-progress-text");
+const customModelList = document.getElementById("custom-model-list");
+const btnRefreshModels = document.getElementById("btn-refresh-models");
+const btnGenerateLines = document.getElementById("btn-generate-lines");
+const generateLinesStatus = document.getElementById("generate-lines-status");
+const trainToolsWarning = document.getElementById("train-tools-warning");
+const customLangRow = document.getElementById("custom-lang-row");
+
+trainingEnabled.addEventListener("change", () => {
+  trainingSettings.classList.toggle("hidden", !trainingEnabled.checked);
+  if (trainingEnabled.checked) {
+    checkTrainingTools();
+    refreshCustomModels();
+  }
+});
+
+trainIterations.addEventListener("input", () => {
+  trainIterationsLabel.textContent = trainIterations.value;
+});
+
+btnTrainBrowse.addEventListener("click", async () => {
+  const dir = await window.api.selectTrainingDir();
+  if (dir) {
+    trainDataDir.value = dir;
+    // Validate
+    trainDataStatus.textContent = "Validating...";
+    try {
+      const result = await window.api.validateTrainingData({ data_dir: dir });
+      if (result.valid) {
+        trainDataStatus.textContent = `Valid: ${result.pairs} image+text pairs`;
+        trainDataStatus.style.color = "#4ecdc4";
+        btnStartTraining.disabled = false;
+      } else {
+        const msgs = [...result.errors, ...result.warnings];
+        trainDataStatus.textContent = msgs.join("; ") || `Found ${result.pairs} pairs (need ≥ 5)`;
+        trainDataStatus.style.color = "#ff6b6b";
+        btnStartTraining.disabled = true;
+      }
+    } catch (err) {
+      trainDataStatus.textContent = err.message;
+      trainDataStatus.style.color = "#ff6b6b";
+    }
+  }
+});
+
+btnStartTraining.addEventListener("click", async () => {
+  const dataDir = trainDataDir.value;
+  if (!dataDir) return;
+
+  btnStartTraining.disabled = true;
+  trainProgress.classList.remove("hidden");
+  trainProgressBar.style.width = "0%";
+  trainProgressText.textContent = "Starting...";
+  log("[TRAIN] Starting fine-tuning...", "info");
+
+  setupProgressListener();
+
+  try {
+    const result = await window.api.startTraining({
+      base_lang: trainBaseLang.value,
+      model_name: trainModelName.value || "grc_manuscript",
+      max_iterations: parseInt(trainIterations.value, 10),
+      learning_rate: parseFloat(trainLearningRate.value),
+      data_dir: dataDir,
+    });
+
+    trainProgressBar.style.width = "100%";
+    trainProgressText.textContent = "Training complete!";
+    log(`[TRAIN] Model saved: ${result.model_name} (error rate: ${result.error_rate.toFixed(1)}%)`, "ok");
+
+    // Refresh model list and language checkboxes
+    refreshCustomModels();
+  } catch (err) {
+    log(`[TRAIN ERROR] ${err.message}`, "error");
+    trainProgressText.textContent = "Error";
+  } finally {
+    btnStartTraining.disabled = false;
+    cleanupProgress();
+  }
+});
+
+async function checkTrainingTools() {
+  try {
+    const result = await window.api.checkTrainingTools();
+    if (!result.available) {
+      trainToolsWarning.classList.remove("hidden");
+      trainToolsWarning.textContent = result.message;
+      btnStartTraining.disabled = true;
+    } else {
+      trainToolsWarning.classList.add("hidden");
+    }
+  } catch (err) {
+    trainToolsWarning.classList.remove("hidden");
+    trainToolsWarning.textContent = `Cannot check training tools: ${err.message}`;
+  }
+}
+
+async function refreshCustomModels() {
+  try {
+    const result = await window.api.listCustomModels();
+    const models = result.models || [];
+
+    if (models.length === 0) {
+      customModelList.innerHTML = "<em>No custom models</em>";
+      customLangRow.classList.add("hidden");
+      customLangRow.innerHTML = "";
+      return;
+    }
+
+    // Model list in training section
+    customModelList.innerHTML = models.map((m) =>
+      `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">
+        <span style="flex:1;">${m.name} (${m.size_mb} MB)</span>
+        <button class="btn-small btn-delete-model" data-name="${m.name}" title="Delete">&times;</button>
+      </div>`
+    ).join("");
+
+    // Add click handlers for delete buttons
+    customModelList.querySelectorAll(".btn-delete-model").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const name = btn.dataset.name;
+        try {
+          await window.api.deleteCustomModel({ name });
+          log(`[TRAIN] Deleted model: ${name}`, "info");
+          refreshCustomModels();
+        } catch (err) {
+          log(`[ERROR] ${err.message}`, "error");
+        }
+      });
+    });
+
+    // Add custom language checkboxes in OCR Settings
+    customLangRow.classList.remove("hidden");
+    customLangRow.innerHTML = models.map((m) =>
+      `<label class="checkbox-item">
+        <input type="checkbox" class="custom-lang-cb" value="${m.name}">
+        <span>${m.name} (custom)</span>
+      </label>`
+    ).join("");
+
+  } catch (err) {
+    customModelList.innerHTML = `<em>Error: ${err.message}</em>`;
+  }
+}
+
+btnRefreshModels.addEventListener("click", refreshCustomModels);
+
+btnGenerateLines.addEventListener("click", async () => {
+  if (!inputPath.value) {
+    generateLinesStatus.textContent = "Load an input file first.";
+    generateLinesStatus.style.color = "#ff6b6b";
+    return;
+  }
+
+  const dir = await window.api.selectTrainingDir();
+  if (!dir) return;
+
+  generateLinesStatus.textContent = "Splitting page into lines...";
+  generateLinesStatus.style.color = "";
+
+  try {
+    const result = await window.api.generateLineImages({
+      image_path: inputPath.value,
+      output_dir: dir,
+      lang: trainBaseLang.value,
+    });
+
+    generateLinesStatus.textContent = `Generated ${result.total} line images in: ${dir}`;
+    generateLinesStatus.style.color = "#4ecdc4";
+    log(`[TRAIN] Split into ${result.total} line images → ${dir}`, "ok");
+
+    // Auto-set as training data dir
+    trainDataDir.value = dir;
+    trainDataStatus.textContent = `${result.total} lines generated. Edit .gt.txt files to correct ground truth, then click "Start Training".`;
+    trainDataStatus.style.color = "#e8c364";
+  } catch (err) {
+    generateLinesStatus.textContent = err.message;
+    generateLinesStatus.style.color = "#ff6b6b";
+    log(`[ERROR] ${err.message}`, "error");
+  }
+});
+
 // ── Start ──
 
 init();
+// Load custom models on startup (if any)
+refreshCustomModels();

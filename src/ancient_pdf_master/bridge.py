@@ -95,7 +95,7 @@ def _parse_page_range(range_str: str, total_pages: int) -> list[int]:
 
 def handle_start_ocr(params: dict) -> dict:
     from .image_handler import load_images
-    from .language import validate_languages
+    from .language import build_tesseract_config, validate_languages
     from .ocr_engine import detect_columns, ocr_page, ocr_page_two_column, retry_low_confidence_words
     from .pdf_builder import build_searchable_pdf
     from .zone_ocr import ZONE_PRESETS, ZoneConfig, ZoneType, ocr_page_with_zones
@@ -110,6 +110,10 @@ def handle_start_ocr(params: dict) -> dict:
 
     # Validate language packs before starting
     validate_languages(lang)
+
+    # Check if custom models need a merged tessdata directory
+    tess_config = build_tesseract_config(lang)
+    tessdata_dir = tess_config.get("tessdata_dir", "")
 
     # Configure zone-based OCR
     zone_preset = params.get("zone_preset", "full_page")
@@ -219,10 +223,10 @@ def handle_start_ocr(params: dict) -> dict:
             ncols, split_frac = detect_columns(img)
             if ncols == 2:
                 return idx, ocr_page_two_column(img, lang=lang, split_frac=split_frac)
-            return idx, ocr_page(img, lang=lang)
+            return idx, ocr_page(img, lang=lang, tessdata_dir=tessdata_dir)
         if zones:
-            return idx, ocr_page_with_zones(img, zones, lang=lang)
-        return idx, ocr_page(img, lang=lang)
+            return idx, ocr_page_with_zones(img, zones, lang=lang, tessdata_dir=tessdata_dir)
+        return idx, ocr_page(img, lang=lang, tessdata_dir=tessdata_dir)
 
     ocr_results = [None] * total
 
@@ -748,6 +752,79 @@ def _merge_overlapping_regions(regions: list[dict]) -> list[dict]:
     return regions
 
 
+# ── Training Handlers ──
+
+def handle_check_training_tools(params: dict) -> dict:
+    from .training import check_training_tools
+    available, message = check_training_tools()
+    return {"available": available, "message": message}
+
+
+def handle_list_custom_models(params: dict) -> dict:
+    from .training import list_custom_models
+    models = list_custom_models()
+    return {"models": models}
+
+
+def handle_delete_custom_model(params: dict) -> dict:
+    from .training import delete_custom_model
+    name = params["name"]
+    deleted = delete_custom_model(name)
+    return {"deleted": deleted, "name": name}
+
+
+def handle_validate_training_data(params: dict) -> dict:
+    from .training import validate_training_data
+    data_dir = params["data_dir"]
+    return validate_training_data(data_dir)
+
+
+def handle_generate_line_images(params: dict) -> dict:
+    from .training import generate_line_images
+    results = generate_line_images(
+        page_image_path=params["image_path"],
+        output_dir=params["output_dir"],
+        lang=params.get("lang", "grc"),
+    )
+    return {"lines": results, "total": len(results)}
+
+
+def handle_start_training(params: dict) -> dict:
+    from .training import TrainingConfig, run_fine_tuning
+
+    config = TrainingConfig(
+        base_lang=params.get("base_lang", "grc"),
+        model_name=params.get("model_name", "grc_manuscript"),
+        max_iterations=params.get("max_iterations", 400),
+        learning_rate=params.get("learning_rate", 0.001),
+        data_dir=params["data_dir"],
+        output_dir=params.get("output_dir", ""),
+        target_error_rate=params.get("target_error_rate", 1.0),
+    )
+
+    def on_progress(status):
+        send_event("progress", {
+            "phase": status.phase,
+            "progress": status.progress,
+            "iteration": status.iteration,
+            "max_iterations": status.max_iterations,
+            "error_rate": status.error_rate,
+            "message": status.message,
+        })
+
+    result = run_fine_tuning(config, progress_callback=on_progress)
+
+    if result.phase == "error":
+        raise ValueError(result.message)
+
+    return {
+        "model_path": result.model_path,
+        "model_name": config.model_name,
+        "error_rate": result.error_rate,
+        "iterations": result.iteration,
+    }
+
+
 # ── Dispatcher ──
 
 HANDLERS = {
@@ -760,6 +837,12 @@ HANDLERS = {
     "preview_preprocess": handle_preview_preprocess,
     "detect_regions": handle_detect_regions,
     "detect_toc": handle_detect_toc,
+    "check_training_tools": handle_check_training_tools,
+    "list_custom_models": handle_list_custom_models,
+    "delete_custom_model": handle_delete_custom_model,
+    "validate_training_data": handle_validate_training_data,
+    "generate_line_images": handle_generate_line_images,
+    "start_training": handle_start_training,
 }
 
 
@@ -821,8 +904,8 @@ def main():
         except json.JSONDecodeError:
             continue
 
-        # Handle long-running OCR in a thread so cancel can work
-        if request.get("method") == "start_ocr":
+        # Handle long-running tasks in a thread so cancel can work
+        if request.get("method") in ("start_ocr", "start_training", "generate_line_images"):
             thread = threading.Thread(target=dispatch, args=(request,))
             thread.start()
         else:

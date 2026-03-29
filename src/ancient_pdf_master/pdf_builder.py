@@ -3,15 +3,89 @@
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 from pathlib import Path
 
 import pikepdf
 from PIL import Image
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from .ocr_engine import OcrPageResult
+
+# ── Unicode font registration ──
+# Helvetica cannot render Greek/extended Latin characters.
+# Register a TrueType font that supports Greek + Latin + Coptic.
+
+_UNICODE_FONT_NAME = "Helvetica"  # fallback
+_FONT_REGISTERED = False
+
+
+def _register_unicode_font():
+    """Register a Unicode-capable TrueType font for the text layer.
+
+    Searches for common system fonts that support Greek characters.
+    Falls back to Helvetica (base14) if no TTF found — but Greek will
+    render as empty boxes in that case.
+    """
+    global _UNICODE_FONT_NAME, _FONT_REGISTERED
+    if _FONT_REGISTERED:
+        return
+
+    _FONT_REGISTERED = True
+
+    # Candidate fonts that support Greek + Latin characters
+    candidates = [
+        # macOS
+        "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        # Linux — DejaVu has excellent Greek coverage
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+        # Noto — broad Unicode coverage
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+        # Windows
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/times.ttf",
+        "C:/Windows/Fonts/cour.ttf",
+    ]
+
+    for font_path in candidates:
+        if os.path.isfile(font_path):
+            try:
+                font_name = "UnicodeTextLayer"
+                pdfmetrics.registerFont(TTFont(font_name, font_path))
+                _UNICODE_FONT_NAME = font_name
+                return
+            except Exception:
+                continue
+
+    # Last resort: try to find ANY .ttf on the system
+    for search_dir in ["/usr/share/fonts", "/System/Library/Fonts", "C:/Windows/Fonts"]:
+        if not os.path.isdir(search_dir):
+            continue
+        for root, _, files in os.walk(search_dir):
+            for f in files:
+                if f.lower().endswith(".ttf"):
+                    try:
+                        fp = os.path.join(root, f)
+                        font_name = "UnicodeTextLayer"
+                        pdfmetrics.registerFont(TTFont(font_name, fp))
+                        _UNICODE_FONT_NAME = font_name
+                        return
+                    except Exception:
+                        continue
 
 
 def _pixels_to_points(pixels: float, dpi: int) -> float:
@@ -53,7 +127,9 @@ def _create_text_layer_pdf(
     page_h = _pixels_to_points(ocr_result.page_height, dpi)
 
     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
-    c.setFont("Helvetica", 12)
+    _register_unicode_font()
+    font_name = _UNICODE_FONT_NAME
+    c.setFont(font_name, 12)
 
     for word in ocr_result.words:
         # Convert pixel coordinates to points
@@ -65,7 +141,7 @@ def _create_text_layer_pdf(
 
         # Calculate font size to roughly match bounding box height
         font_size = max(h_pt * 0.85, 4)
-        c.setFont("Helvetica", font_size)
+        c.setFont(font_name, font_size)
 
         # Render mode 3 = invisible text
         text_obj = c.beginText(x_pt, y_pt)
@@ -84,10 +160,12 @@ def _render_text_lines(c, lines, page_h: float, dpi: int):
 
     Each line is rendered as a single text run with spaces between words,
     ensuring continuous text selection in PDF viewers.
+    Uses a Unicode TTF font to properly encode Greek/Latin characters.
     """
     from reportlab.pdfbase.pdfmetrics import stringWidth
 
-    font_name = "Helvetica"
+    _register_unicode_font()
+    font_name = _UNICODE_FONT_NAME
 
     for line in lines:
         if not line.words:
@@ -132,15 +210,18 @@ def _render_text_lines(c, lines, page_h: float, dpi: int):
 
 
 def _render_text_words(c, words, page_h: float, dpi: int):
-    """Fallback: render text word-by-word (old behavior)."""
-    c.setFont("Helvetica", 12)
+    """Fallback: render text word-by-word (old behavior).
+    Uses Unicode TTF font to properly encode Greek/Latin characters."""
+    _register_unicode_font()
+    font_name = _UNICODE_FONT_NAME
+    c.setFont(font_name, 12)
     for word in words:
         x_pt = _pixels_to_points(word.x, dpi)
         y_pt = page_h - _pixels_to_points(word.y + word.height, dpi)
         h_pt = _pixels_to_points(word.height, dpi)
 
         font_size = max(h_pt * 0.85, 4)
-        c.setFont("Helvetica", font_size)
+        c.setFont(font_name, font_size)
 
         text_obj = c.beginText(x_pt, y_pt)
         text_obj.setTextRenderMode(3)
