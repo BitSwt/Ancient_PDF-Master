@@ -130,6 +130,51 @@ ipcMain.handle("detect-toc", async (_event, params) => {
   return pythonBridge.send("detect_toc", params);
 });
 
+// ── Training IPC Handlers ──
+
+ipcMain.handle("check-training-tools", async () => {
+  return pythonBridge.send("check_training_tools", {});
+});
+
+ipcMain.handle("list-custom-models", async () => {
+  return pythonBridge.send("list_custom_models", {});
+});
+
+ipcMain.handle("delete-custom-model", async (_event, params) => {
+  return pythonBridge.send("delete_custom_model", params);
+});
+
+ipcMain.handle("validate-training-data", async (_event, params) => {
+  return pythonBridge.send("validate_training_data", params);
+});
+
+ipcMain.handle("generate-line-images", async (_event, params) => {
+  const onProgress = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("ocr-progress", data);
+    }
+  };
+  return pythonBridge.send("generate_line_images", params, onProgress);
+});
+
+ipcMain.handle("start-training", async (_event, params) => {
+  const onProgress = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("ocr-progress", data);
+    }
+  };
+  return pythonBridge.send("start_training", params, onProgress);
+});
+
+ipcMain.handle("select-training-dir", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select Training Data Directory",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled) return null;
+  return result.filePaths[0];
+});
+
 ipcMain.handle("get-setup-status", async () => {
   if (!pythonBridge) return { message: "Initializing..." };
   return { message: pythonBridge._setupMessage || null };

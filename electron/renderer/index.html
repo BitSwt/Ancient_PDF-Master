@@ -74,6 +74,7 @@
               <label class="checkbox-item"><input type="checkbox" id="lang-lat" checked><span>Latin</span></label>
               <label class="checkbox-item"><input type="checkbox" id="lang-eng" checked><span>English</span></label>
             </div>
+            <div id="custom-lang-row" class="checkbox-row hidden"></div>
           </div>
           <div class="settings-group">
             <label class="settings-label" for="dpi-select">DPI</label>
@@ -332,6 +333,90 @@
             <div id="toc-import-area" class="hidden" style="margin-top:8px;">
               <textarea id="toc-import-text" class="text-input" rows="5" placeholder="Chapter 1 ... 5&#10;  Section 1.1 ... 8"></textarea>
               <button id="btn-parse-toc" class="btn-small" style="margin-top:4px;">Parse</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Model Fine-Tuning -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="training-enabled">
+              <span class="toggle-track"></span>
+              <span>Model Training</span>
+            </label>
+          </h2>
+          <div id="training-settings" class="hidden">
+            <div class="zone-hint" style="margin-bottom:10px;">
+              Fine-tune Tesseract for handwritten manuscripts. Provide line images + ground truth text pairs.
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">Base Model</label>
+              <select id="train-base-lang" class="select-input">
+                <option value="grc">Ancient Greek (grc)</option>
+                <option value="lat">Latin (lat)</option>
+                <option value="eng">English (eng)</option>
+              </select>
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">Model Name</label>
+              <input type="text" id="train-model-name" class="text-input" placeholder="grc_manuscript" value="grc_manuscript">
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">Training Data</label>
+              <div class="file-row">
+                <input type="text" id="train-data-dir" readonly placeholder="Select directory with images + .gt.txt">
+                <button id="btn-train-browse" class="btn btn-secondary">Browse</button>
+              </div>
+              <div class="zone-hint" id="train-data-status"></div>
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">Max Iterations</label>
+              <div class="slider-row">
+                <input type="range" id="train-iterations" min="100" max="2000" value="400" step="100" class="slider-input">
+                <span id="train-iterations-label" class="slider-label">400</span>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">Learning Rate</label>
+              <select id="train-learning-rate" class="select-input">
+                <option value="0.0001">0.0001 (conservative)</option>
+                <option value="0.001" selected>0.001 (default)</option>
+                <option value="0.01">0.01 (aggressive)</option>
+              </select>
+            </div>
+
+            <div class="settings-group" style="margin-top:10px;">
+              <button id="btn-start-training" class="btn btn-primary" style="width:100%;" disabled>Start Training</button>
+            </div>
+            <div id="train-progress" class="hidden" style="margin-top:8px;">
+              <div class="progress-bar-container">
+                <div id="train-progress-bar" class="progress-bar" style="width:0%"></div>
+              </div>
+              <div id="train-progress-text" class="progress-text">Ready</div>
+            </div>
+
+            <!-- Custom Models -->
+            <div class="settings-group" style="margin-top:14px; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px;">
+              <label class="settings-label">Custom Models</label>
+              <div id="custom-model-list" class="zone-hint">No custom models</div>
+              <button id="btn-refresh-models" class="btn-small" style="margin-top:6px;">Refresh</button>
+            </div>
+
+            <!-- Helper: Split page into lines -->
+            <div class="settings-group" style="margin-top:14px; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px;">
+              <label class="settings-label">Prepare Training Data</label>
+              <div class="zone-hint" style="margin-bottom:6px;">Split a page image into individual line images with initial OCR text. Edit the .gt.txt files to correct the ground truth.</div>
+              <button id="btn-generate-lines" class="btn btn-secondary" style="width:100%;">Split Page into Lines</button>
+              <div id="generate-lines-status" class="zone-hint" style="margin-top:4px;"></div>
+            </div>
+
+            <div id="train-tools-warning" class="hidden" style="margin-top:8px; padding:8px; background:rgba(255,180,0,0.1); border-radius:6px; font-size:12px; color:#ffb400;">
             </div>
           </div>
         </section>

@@ -202,12 +202,15 @@ def ocr_zone(
     image: Image.Image,
     zone: ZoneConfig,
     lang: str = "grc+lat+eng",
+    tessdata_dir: str = "",
 ) -> tuple[list[OcrWord], list[OcrLine]]:
     """OCR a single zone and return words+lines with coordinates adjusted to full page."""
     zone_lang = zone.lang or lang
     zone_img = _crop_zone(image, zone)
 
     config = f"--psm {zone.psm}"
+    if tessdata_dir:
+        config += f" --tessdata-dir {tessdata_dir}"
     data = pytesseract.image_to_data(
         zone_img, lang=zone_lang, config=config, output_type=Output.DICT,
     )
@@ -254,6 +257,7 @@ def ocr_page_with_zones(
     image: Image.Image,
     zones: list[ZoneConfig],
     lang: str = "grc+lat+eng",
+    tessdata_dir: str = "",
 ) -> OcrPageResult:
     """OCR a page using multiple zones and merge results.
 
@@ -265,7 +269,7 @@ def ocr_page_with_zones(
     all_lines: list[OcrLine] = []
 
     for zone in zones:
-        zone_words, zone_lines = ocr_zone(image, zone, lang)
+        zone_words, zone_lines = ocr_zone(image, zone, lang, tessdata_dir=tessdata_dir)
         all_words.extend(zone_words)
         all_lines.extend(zone_lines)
 

@@ -66,18 +66,26 @@ class OcrPageResult:
         return len(self.words)
 
 
-def ocr_page(image: Image.Image, lang: str = "grc+lat+eng", psm: int = 3) -> OcrPageResult:
+def ocr_page(
+    image: Image.Image,
+    lang: str = "grc+lat+eng",
+    psm: int = 3,
+    tessdata_dir: str = "",
+) -> OcrPageResult:
     """Run OCR on a single page image and return structured results.
 
     Args:
         image: PIL Image of the page.
         lang: Tesseract language string (e.g. 'grc+lat+eng').
         psm: Tesseract page segmentation mode.
+        tessdata_dir: Optional custom tessdata directory.
 
     Returns:
         OcrPageResult with word-level bounding boxes, lines, and confidence.
     """
     config = f"--psm {psm}"
+    if tessdata_dir:
+        config += f" --tessdata-dir {tessdata_dir}"
     data = pytesseract.image_to_data(image, lang=lang, config=config, output_type=Output.DICT)
     full_text = pytesseract.image_to_string(image, lang=lang, config=config)
 
