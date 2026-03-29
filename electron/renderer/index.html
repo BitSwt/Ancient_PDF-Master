@@ -164,6 +164,26 @@
           </div>
         </section>
 
+        <!-- Crop -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="crop-enabled">
+              <span class="toggle-track"></span>
+              <span>Crop</span>
+            </label>
+          </h2>
+          <div id="crop-settings" class="hidden">
+            <div class="zone-hint" style="margin-bottom:8px;">Crop pages to selected area. Drag edges/corners on preview to adjust.</div>
+            <div class="crop-controls">
+              <button id="btn-crop-set" class="btn btn-secondary" style="flex:1;">Set Crop Area</button>
+              <button id="btn-crop-reset" class="btn-small">Reset</button>
+              <button id="btn-crop-apply-all" class="btn-small">Apply to All</button>
+            </div>
+            <div class="crop-info" id="crop-info" style="margin-top:6px;"></div>
+          </div>
+        </section>
+
         <!-- Preprocessing -->
         <section class="card">
           <h2>
@@ -364,6 +384,11 @@
             <input type="checkbox" id="pv-show-zones" checked>
             <span class="toggle-track"></span>
             <span>Zones</span>
+          </label>
+          <label class="toggle-switch compact">
+            <input type="checkbox" id="pv-show-crop" checked>
+            <span class="toggle-track"></span>
+            <span>Crop</span>
           </label>
           <label class="toggle-switch compact">
             <input type="checkbox" id="pv-show-preprocess">

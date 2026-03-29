@@ -153,6 +153,26 @@ def handle_start_ocr(params: dict) -> dict:
 
     total = len(images)
 
+    # Crop pages if configured
+    crop_config = params.get("crop")
+    if crop_config:
+        send_event("progress", {"current": 0, "total": total, "message": "Cropping pages..."})
+        for i in range(len(images)):
+            # crop_config keys are string page indices from JS
+            page_key = str(i)
+            if selected_indices is not None:
+                # Map back to original page index
+                page_key = str(selected_indices[i]) if i < len(selected_indices) else str(i)
+            crop = crop_config.get(page_key) or crop_config.get(str(i))
+            if crop:
+                img = images[i]
+                x1 = int(crop["x_start"] * img.width)
+                y1 = int(crop["y_start"] * img.height)
+                x2 = int(crop["x_end"] * img.width)
+                y2 = int(crop["y_end"] * img.height)
+                images[i] = img.crop((x1, y1, x2, y2))
+        send_event("progress", {"current": total, "total": total, "message": "Crop done"})
+
     # Auto deskew (independent of preprocessing toggle)
     if auto_deskew:
         from .preprocess import _deskew
