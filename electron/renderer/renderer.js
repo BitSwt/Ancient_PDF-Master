@@ -260,7 +260,15 @@ document.addEventListener("drop", (e) => {
     const ext = file.name.split(".").pop().toLowerCase();
     const supported = ["pdf", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"];
     if (supported.includes(ext)) {
-      handleFileInput(file.path);
+      // Use webUtils.getPathForFile (Electron 33+) with fallback
+      const filePath = window.api.getPathForFile
+        ? window.api.getPathForFile(file)
+        : file.path;
+      if (filePath) {
+        handleFileInput(filePath);
+      } else {
+        log("[WARN] Could not get file path from drop", "warn");
+      }
     } else {
       log(`[WARN] Unsupported file type: .${ext}`, "warn");
     }
@@ -422,13 +430,17 @@ function drawZoneOverlay() {
   const ctx = cvs.getContext("2d");
   ctx.clearRect(0, 0, cvs.width, cvs.height);
 
+  const w = cvs.width;
+  const h = cvs.height;
+
+  // Always draw crop overlay (independent of zones)
+  _drawCropOverlay(ctx, w, h);
+
   if (!pvShowZones.checked) return;
 
   const preset = zonePreset.value;
   if (preset === "full_page") return;
 
-  const w = cvs.width;
-  const h = cvs.height;
   const colors = ["rgba(52, 208, 88, 0.2)", "rgba(88, 166, 255, 0.2)", "rgba(248, 81, 73, 0.2)"];
   const borders = ["rgba(52, 208, 88, 0.6)", "rgba(88, 166, 255, 0.6)", "rgba(248, 81, 73, 0.6)"];
 
@@ -440,7 +452,6 @@ function drawZoneOverlay() {
     ctx.textAlign = "center";
     ctx.fillText("Auto column detection (1 or 2 cols per page)", w / 2, 20);
     ctx.textAlign = "left";
-    _drawCropOverlay(ctx, w, h);
     return;
   } else if (preset === "two_column") {
     const m = getMarginValues();
@@ -551,9 +562,6 @@ function drawZoneOverlay() {
     }
     ctx.textAlign = "left";
   });
-
-  // Draw crop overlay
-  _drawCropOverlay(ctx, w, h);
 }
 
 function _drawCropOverlay(ctx, w, h) {

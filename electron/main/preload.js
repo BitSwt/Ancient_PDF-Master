@@ -1,10 +1,16 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   // File dialogs
   selectInputFile: () => ipcRenderer.invoke("select-input-file"),
   selectOutputFile: (defaultName) =>
     ipcRenderer.invoke("select-output-file", defaultName),
+
+  // Get file path from dropped File object (Electron 33+)
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+
+  // Setup
+  getSetupStatus: () => ipcRenderer.invoke("get-setup-status"),
 
   // Tesseract
   checkTesseract: () => ipcRenderer.invoke("check-tesseract"),

@@ -30,6 +30,10 @@
         "from": "src",
         "to": "python",
         "filter": ["**/*.py"]
+      },
+      {
+        "from": "pyproject.toml",
+        "to": "pyproject.toml"
       }
     ],
     "mac": {
@@ -64,7 +68,8 @@
     },
     "linux": {
       "target": ["AppImage", "deb"],
-      "category": "Office"
+      "category": "Office",
+      "icon": "assets/icon.png"
     },
     "win": {
       "target": ["nsis"],

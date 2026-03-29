@@ -43,26 +43,36 @@ class PythonBridge {
     this._readyPromise = this._ensurePackagesAndSpawn();
   }
 
+  _venvPythonPath(venvDir) {
+    if (process.platform === "win32") {
+      return path.join(venvDir, "Scripts", "python.exe");
+    }
+    return path.join(venvDir, "bin", "python3");
+  }
+
   _findPython() {
     const candidates = [];
 
-    // 1. ~/Library/Application Support/Ancient PDF Master/.venv
-    const appSupportVenv = path.join(
-      app.getPath("userData"),
-      ".venv",
-      "bin",
-      "python3"
-    );
-    candidates.push(appSupportVenv);
+    // 1. App-local venv (Application Support / AppData)
+    this._appVenvDir = path.join(app.getPath("userData"), ".venv");
+    candidates.push(this._venvPythonPath(this._appVenvDir));
 
     // 2. Project-local .venv (dev mode)
     const projectRoot = path.join(__dirname, "../..");
-    const localVenv = path.join(projectRoot, ".venv", "bin", "python3");
-    candidates.push(localVenv);
+    const localVenv = path.join(projectRoot, ".venv");
+    candidates.push(this._venvPythonPath(localVenv));
 
-    // 3. Homebrew Python paths
-    candidates.push("/opt/homebrew/bin/python3");
-    candidates.push("/usr/local/bin/python3");
+    // 3. Homebrew Python paths (macOS)
+    if (process.platform === "darwin") {
+      candidates.push("/opt/homebrew/bin/python3");
+      candidates.push("/usr/local/bin/python3");
+    }
+
+    // 4. Common Linux paths
+    if (process.platform === "linux") {
+      candidates.push("/usr/bin/python3");
+      candidates.push("/usr/local/bin/python3");
+    }
 
     for (const p of candidates) {
       if (fs.existsSync(p)) {
@@ -84,10 +94,17 @@ class PythonBridge {
       return "pip3";
     }
     const dir = path.dirname(this._pythonPath);
-    const pip = path.join(dir, "pip3");
-    if (fs.existsSync(pip)) return pip;
-    const pip2 = path.join(dir, "pip");
-    if (fs.existsSync(pip2)) return pip2;
+    if (process.platform === "win32") {
+      const pip = path.join(dir, "pip3.exe");
+      if (fs.existsSync(pip)) return pip;
+      const pip2 = path.join(dir, "pip.exe");
+      if (fs.existsSync(pip2)) return pip2;
+    } else {
+      const pip = path.join(dir, "pip3");
+      if (fs.existsSync(pip)) return pip;
+      const pip2 = path.join(dir, "pip");
+      if (fs.existsSync(pip2)) return pip2;
+    }
     return "pip3";
   }
 
@@ -100,19 +117,30 @@ class PythonBridge {
 
   _getEnvPath() {
     const existing = process.env.PATH || "";
-    const extraPaths = [
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
-      "/opt/homebrew/sbin",
-      "/usr/local/sbin",
-    ];
-    const parts = existing.split(":");
+    const sep = process.platform === "win32" ? ";" : ":";
+    const extraPaths = [];
+
+    if (process.platform === "darwin") {
+      extraPaths.push("/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin", "/usr/local/sbin");
+    } else if (process.platform === "linux") {
+      extraPaths.push("/usr/local/bin", "/usr/bin");
+    }
+
+    // Add venv bin to PATH so Tesseract and other tools are found
+    if (this._pythonPath && this._pythonPath !== "python3") {
+      const venvBin = path.dirname(this._pythonPath);
+      if (!extraPaths.includes(venvBin)) {
+        extraPaths.unshift(venvBin);
+      }
+    }
+
+    const parts = existing.split(sep);
     for (const p of extraPaths) {
       if (!parts.includes(p)) {
         parts.unshift(p);
       }
     }
-    return parts.join(":");
+    return parts.join(sep);
   }
 
   _getBrewPrefix() {
@@ -127,12 +155,23 @@ class PythonBridge {
 
   /**
    * Check if required packages are installed, install them if not.
+   * Auto-creates a venv in Application Support if packaged and none exists.
    * Then spawn the bridge process.
    */
   async _ensurePackagesAndSpawn() {
-    const python = this._pythonPath;
     const envPath = this._getEnvPath();
     const env = { ...process.env, PATH: envPath };
+
+    // If packaged and no venv exists, create one
+    if (app.isPackaged && this._appVenvDir && !fs.existsSync(this._appVenvDir)) {
+      console.log("[Python] No venv found — creating in Application Support...");
+      this._emitSetupProgress("Creating Python environment...");
+      await this._createVenv(env);
+      // Re-discover python after venv creation
+      this._pythonPath = this._findPython();
+    }
+
+    const python = this._pythonPath;
 
     // Quick check: can Python import all required packages?
     const checkScript = REQUIRED_PACKAGES
@@ -156,10 +195,78 @@ class PythonBridge {
     }
 
     if (needsInstall) {
+      this._emitSetupProgress("Installing Python packages...");
       await this._installPackages(env);
     }
 
+    this._emitSetupProgress(null); // clear setup status
     return this._spawnBridge();
+  }
+
+  /**
+   * Create a virtual environment in Application Support.
+   */
+  _createVenv(env) {
+    return new Promise((resolve, reject) => {
+      // Find system python3 for venv creation
+      const systemPython = this._findSystemPython();
+      console.log(`[Python] Creating venv with: ${systemPython} at ${this._appVenvDir}`);
+
+      // Ensure parent dir exists
+      const parentDir = path.dirname(this._appVenvDir);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+
+      const proc = spawn(systemPython, ["-m", "venv", this._appVenvDir], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 60000,
+      });
+
+      let stderr = "";
+      proc.stderr.on("data", (d) => { stderr += d.toString(); });
+
+      proc.on("exit", (code) => {
+        if (code === 0) {
+          console.log("[Python] Venv created successfully");
+          resolve();
+        } else {
+          console.error("[Python] Venv creation failed:", stderr);
+          reject(new Error(`Failed to create Python venv: ${stderr.split("\n").pop()}`));
+        }
+      });
+
+      proc.on("error", (err) => {
+        reject(new Error(`Failed to run python3 for venv: ${err.message}`));
+      });
+    });
+  }
+
+  /**
+   * Find a system Python 3 (not from a venv) for creating new venvs.
+   */
+  _findSystemPython() {
+    const candidates = [];
+    if (process.platform === "darwin") {
+      candidates.push("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3");
+    } else if (process.platform === "linux") {
+      candidates.push("/usr/bin/python3", "/usr/local/bin/python3");
+    } else {
+      candidates.push("python3", "python");
+    }
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return p;
+    }
+    return "python3";
+  }
+
+  /**
+   * Emit a setup progress event to the renderer (for first-launch UI).
+   */
+  _emitSetupProgress(message) {
+    this._setupMessage = message;
+    // Will be picked up by the renderer via IPC if mainWindow is available
   }
 
   /**
