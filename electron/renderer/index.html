@@ -469,6 +469,31 @@
               <div id="generate-lines-status" class="zone-hint" style="margin-top:4px;"></div>
             </div>
 
+            <!-- Dataset Browser -->
+            <div class="settings-group" style="margin-top:14px; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px;">
+              <label class="settings-label">Training Datasets</label>
+              <div class="zone-hint" style="margin-bottom:6px;">
+                Download verified training data from Lace (Greek OCR corrections) and OpenGreekAndLatin (TEI corpus).
+              </div>
+
+              <!-- Available datasets -->
+              <div id="dataset-catalog" style="max-height:220px; overflow-y:auto; margin-bottom:8px;"></div>
+
+              <!-- Download / Convert progress -->
+              <div id="dataset-progress-section" class="hidden" style="margin-top:8px;">
+                <div class="progress-bar-container">
+                  <div id="dataset-progress-bar" class="progress-bar" style="width:0%"></div>
+                </div>
+                <div id="dataset-progress-text" class="progress-text">Ready</div>
+              </div>
+
+              <!-- Downloaded datasets -->
+              <div style="margin-top:8px;">
+                <label class="settings-label" style="font-size:11px; opacity:0.7;">Downloaded</label>
+                <div id="downloaded-dataset-list" class="zone-hint">None yet</div>
+              </div>
+            </div>
+
             <div id="train-tools-warning" class="hidden" style="margin-top:8px; padding:8px; background:rgba(255,180,0,0.1); border-radius:6px; font-size:12px; color:#ffb400;">
             </div>
           </div>
