@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld("api", {
     return () => ipcRenderer.removeListener("ocr-progress", handler);
   },
 
+  // Preview
+  loadPreview: (params) => ipcRenderer.invoke("load-preview", params),
+  previewPreprocess: (params) => ipcRenderer.invoke("preview-preprocess", params),
+
   // File operations
   openFile: (path) => ipcRenderer.invoke("open-file", path),
   showInFolder: (path) => ipcRenderer.invoke("show-in-folder", path),

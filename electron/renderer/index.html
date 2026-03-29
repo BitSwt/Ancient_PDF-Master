@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:">
   <title>Ancient PDF Master</title>
   <link rel="stylesheet" href="styles/main.css">
 </head>
@@ -13,239 +13,315 @@
     <span class="titlebar-text">Ancient PDF Master</span>
   </div>
 
-  <div class="container">
-    <!-- Update banner -->
-    <div id="update-banner" class="update-banner hidden">
-      <div class="update-info">
-        <span id="update-message">Update available</span>
-        <div id="update-progress-bar" class="update-progress hidden">
-          <div id="update-progress-fill" class="update-progress-fill"></div>
-        </div>
-      </div>
-      <div class="update-actions">
-        <button id="btn-update-download" class="btn btn-small-accent hidden">Download</button>
-        <button id="btn-update-install" class="btn btn-small-accent hidden">Restart & Update</button>
-        <button id="btn-update-dismiss" class="btn-small">&times;</button>
-      </div>
-    </div>
+  <!-- Main layout: sidebar + preview -->
+  <div class="app-layout">
 
-    <!-- Status banner -->
-    <div id="tesseract-status" class="status-banner hidden">
-      <span id="status-icon"></span>
-      <span id="status-message">Checking Tesseract...</span>
-    </div>
+    <!-- ── Left Panel: Controls ── -->
+    <div class="sidebar">
+      <div class="sidebar-scroll">
 
-    <!-- Input Section -->
-    <section class="card">
-      <h2>Input</h2>
-      <div class="file-row">
-        <input type="text" id="input-path" readonly placeholder="Select an image or PDF file...">
-        <button id="btn-browse-input" class="btn btn-secondary">Browse</button>
-      </div>
-    </section>
-
-    <!-- Output Section -->
-    <section class="card">
-      <h2>Output</h2>
-      <div class="file-row">
-        <input type="text" id="output-path" placeholder="Output path (auto-generated if empty)">
-        <button id="btn-browse-output" class="btn btn-secondary">Browse</button>
-      </div>
-    </section>
-
-    <!-- OCR Settings -->
-    <section class="card">
-      <h2>OCR Settings</h2>
-
-      <div class="settings-group">
-        <label class="settings-label">Languages</label>
-        <div class="checkbox-row">
-          <label class="checkbox-item">
-            <input type="checkbox" id="lang-grc" checked>
-            <span>Ancient Greek</span>
-          </label>
-          <label class="checkbox-item">
-            <input type="checkbox" id="lang-lat" checked>
-            <span>Latin</span>
-          </label>
-          <label class="checkbox-item">
-            <input type="checkbox" id="lang-eng" checked>
-            <span>English</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="settings-group">
-        <label class="settings-label" for="dpi-select">DPI (for PDF input)</label>
-        <select id="dpi-select" class="select-input">
-          <option value="150">150 DPI</option>
-          <option value="200">200 DPI</option>
-          <option value="300" selected>300 DPI (recommended)</option>
-          <option value="400">400 DPI</option>
-          <option value="600">600 DPI (high quality)</option>
-        </select>
-      </div>
-
-      <div class="settings-group">
-        <label class="settings-label" for="zone-preset">Page Layout</label>
-        <select id="zone-preset" class="select-input">
-          <option value="full_page">Full Page (default)</option>
-          <option value="left_margin">Left Margin</option>
-          <option value="both_margins">Both Margins</option>
-          <option value="custom">Custom Zones</option>
-        </select>
-        <div class="zone-hint" id="zone-hint">
-          Use "Left Margin" for Loeb, OCT, Teubner editions with marginal verse numbers.
-        </div>
-      </div>
-
-      <div id="zone-params" class="hidden">
-        <div class="settings-group">
-          <label class="settings-label">Margin width (% of page width)</label>
-          <div class="slider-row">
-            <input type="range" id="zone-margin-width" min="5" max="25" value="12" class="slider-input">
-            <span id="zone-margin-label" class="slider-label">12%</span>
+        <!-- Update banner -->
+        <div id="update-banner" class="update-banner hidden">
+          <div class="update-info">
+            <span id="update-message">Update available</span>
+            <div id="update-progress-bar" class="update-progress hidden">
+              <div id="update-progress-fill" class="update-progress-fill"></div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div id="zone-custom" class="hidden">
-        <div id="zone-custom-entries"></div>
-        <button id="btn-add-zone" class="btn-small" style="margin-top:8px;">+ Add Zone</button>
-        <div class="zone-hint">
-          Define zones as percentage of page. PSM 11 = sparse text (margins), PSM 3 = auto (body).
-        </div>
-      </div>
-    </section>
-
-    <!-- Bilingual Split Settings -->
-    <section class="card">
-      <h2>
-        <label class="toggle-switch">
-          <input type="checkbox" id="split-enabled">
-          <span class="toggle-track"></span>
-          <span>Bilingual Split</span>
-        </label>
-      </h2>
-      <div id="split-settings" class="hidden">
-        <div class="settings-group">
-          <label class="settings-label">Split Pattern</label>
-          <select id="split-pattern" class="select-input">
-            <option value="alternating">Alternating (odd = Lang A, even = Lang B)</option>
-            <option value="custom">Custom page ranges</option>
-          </select>
-        </div>
-
-        <div id="split-custom" class="hidden">
-          <div class="settings-group">
-            <label class="settings-label" for="split-lang-a-pages">Language A pages (e.g. "1, 3, 5-10")</label>
-            <input type="text" id="split-lang-a-pages" class="text-input" placeholder="odd">
-          </div>
-          <div class="settings-group">
-            <label class="settings-label" for="split-lang-b-pages">Language B pages (e.g. "2, 4, 11-20")</label>
-            <input type="text" id="split-lang-b-pages" class="text-input" placeholder="even">
+          <div class="update-actions">
+            <button id="btn-update-download" class="btn btn-small-accent hidden">Download</button>
+            <button id="btn-update-install" class="btn btn-small-accent hidden">Restart & Update</button>
+            <button id="btn-update-dismiss" class="btn-small">&times;</button>
           </div>
         </div>
 
-        <div class="settings-group">
-          <label class="settings-label" for="split-common-pages">Common pages (e.g. "1-3, 5")</label>
-          <input type="text" id="split-common-pages" class="text-input" placeholder="Leave empty if none">
+        <!-- Status banner -->
+        <div id="tesseract-status" class="status-banner hidden">
+          <span id="status-icon"></span>
+          <span id="status-message">Checking Tesseract...</span>
         </div>
 
-        <div class="settings-group">
-          <label class="settings-label">Output file names</label>
-          <div class="file-row" style="margin-bottom:6px;">
-            <input type="text" id="split-output-a" placeholder="Language A output (auto)">
+        <!-- Drop Zone / Input -->
+        <section class="card drop-zone" id="drop-zone">
+          <h2>Input</h2>
+          <div class="drop-area" id="drop-area">
+            <div class="drop-icon">+</div>
+            <div class="drop-text">Drag & drop PDF or image files here</div>
+            <div class="drop-hint">or click Browse</div>
           </div>
+          <div class="file-row" style="margin-top:10px;">
+            <input type="text" id="input-path" readonly placeholder="No file selected">
+            <button id="btn-browse-input" class="btn btn-secondary">Browse</button>
+          </div>
+        </section>
+
+        <!-- Output -->
+        <section class="card">
+          <h2>Output</h2>
           <div class="file-row">
-            <input type="text" id="split-output-b" placeholder="Language B output (auto)">
+            <input type="text" id="output-path" placeholder="Auto-generated">
+            <button id="btn-browse-output" class="btn btn-secondary">Browse</button>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <!-- Page Numbering -->
-    <section class="card">
-      <h2>
-        <label class="toggle-switch">
-          <input type="checkbox" id="pagelabels-enabled">
-          <span class="toggle-track"></span>
-          <span>Page Numbering</span>
-        </label>
-      </h2>
-      <div id="pagelabels-settings" class="hidden">
-        <div class="settings-group">
-          <label class="settings-label">Preset</label>
-          <select id="pagelabels-preset" class="select-input">
-            <option value="roman-arabic">Front matter (Roman) + Body (Arabic)</option>
-            <option value="custom">Custom ranges</option>
-          </select>
-        </div>
-
-        <div id="pagelabels-simple">
+        <!-- OCR Settings -->
+        <section class="card">
+          <h2>OCR Settings</h2>
           <div class="settings-group">
-            <label class="settings-label" for="pagelabels-body-start">Body starts at page</label>
-            <input type="number" id="pagelabels-body-start" class="text-input" value="1" min="1" style="width:80px;">
+            <label class="settings-label">Languages</label>
+            <div class="checkbox-row">
+              <label class="checkbox-item"><input type="checkbox" id="lang-grc" checked><span>Ancient Greek</span></label>
+              <label class="checkbox-item"><input type="checkbox" id="lang-lat" checked><span>Latin</span></label>
+              <label class="checkbox-item"><input type="checkbox" id="lang-eng" checked><span>English</span></label>
+            </div>
           </div>
+          <div class="settings-group">
+            <label class="settings-label" for="dpi-select">DPI</label>
+            <select id="dpi-select" class="select-input">
+              <option value="150">150</option>
+              <option value="200">200</option>
+              <option value="300" selected>300 (recommended)</option>
+              <option value="400">400</option>
+              <option value="600">600</option>
+            </select>
+          </div>
+          <div class="settings-group">
+            <label class="settings-label" for="zone-preset">Page Layout</label>
+            <select id="zone-preset" class="select-input">
+              <option value="full_page">Full Page</option>
+              <option value="left_margin">Left Margin</option>
+              <option value="both_margins">Both Margins</option>
+              <option value="custom">Custom Zones</option>
+            </select>
+            <div class="zone-hint" id="zone-hint">Use "Left Margin" for Loeb, OCT, Teubner editions.</div>
+          </div>
+
+          <div id="zone-params" class="hidden">
+            <div class="settings-group">
+              <label class="settings-label">Margin width (%)</label>
+              <div class="slider-row">
+                <input type="range" id="zone-margin-width" min="5" max="25" value="12" class="slider-input">
+                <span id="zone-margin-label" class="slider-label">12%</span>
+              </div>
+            </div>
+          </div>
+          <div id="zone-custom" class="hidden">
+            <div id="zone-custom-entries"></div>
+            <button id="btn-add-zone" class="btn-small" style="margin-top:8px;">+ Add Zone</button>
+          </div>
+        </section>
+
+        <!-- Preprocessing -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="preprocess-enabled">
+              <span class="toggle-track"></span>
+              <span>Preprocessing</span>
+            </label>
+          </h2>
+          <div id="preprocess-settings" class="hidden">
+            <div class="toggle-row">
+              <label class="toggle-switch compact">
+                <input type="checkbox" id="pp-deskew">
+                <span class="toggle-track"></span>
+                <span>Deskew (straighten)</span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <label class="toggle-switch compact">
+                <input type="checkbox" id="pp-autocontrast">
+                <span class="toggle-track"></span>
+                <span>Auto Contrast</span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <label class="toggle-switch compact">
+                <input type="checkbox" id="pp-denoise">
+                <span class="toggle-track"></span>
+                <span>Denoise</span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <label class="toggle-switch compact">
+                <input type="checkbox" id="pp-grayscale">
+                <span class="toggle-track"></span>
+                <span>Grayscale</span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <label class="toggle-switch compact">
+                <input type="checkbox" id="pp-bw">
+                <span class="toggle-track"></span>
+                <span>Black & White</span>
+              </label>
+            </div>
+            <div id="pp-bw-settings" class="hidden" style="margin-left:46px;">
+              <label class="settings-label">Threshold</label>
+              <div class="slider-row">
+                <input type="range" id="pp-bw-threshold" min="50" max="220" value="128" class="slider-input">
+                <span id="pp-bw-label" class="slider-label">128</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Bilingual Split -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="split-enabled">
+              <span class="toggle-track"></span>
+              <span>Bilingual Split</span>
+            </label>
+          </h2>
+          <div id="split-settings" class="hidden">
+            <div class="settings-group">
+              <label class="settings-label">Pattern</label>
+              <select id="split-pattern" class="select-input">
+                <option value="alternating">Alternating (odd/even)</option>
+                <option value="custom">Custom ranges</option>
+              </select>
+            </div>
+            <div id="split-custom" class="hidden">
+              <div class="settings-group">
+                <label class="settings-label">Language A pages</label>
+                <input type="text" id="split-lang-a-pages" class="text-input" placeholder="odd">
+              </div>
+              <div class="settings-group">
+                <label class="settings-label">Language B pages</label>
+                <input type="text" id="split-lang-b-pages" class="text-input" placeholder="even">
+              </div>
+            </div>
+            <div class="settings-group">
+              <label class="settings-label">Common pages</label>
+              <input type="text" id="split-common-pages" class="text-input" placeholder="e.g. 1-3">
+            </div>
+            <div class="settings-group">
+              <label class="settings-label">Output files</label>
+              <div class="file-row" style="margin-bottom:6px;">
+                <input type="text" id="split-output-a" placeholder="Lang A (auto)">
+              </div>
+              <div class="file-row">
+                <input type="text" id="split-output-b" placeholder="Lang B (auto)">
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Page Numbering -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="pagelabels-enabled">
+              <span class="toggle-track"></span>
+              <span>Page Numbering</span>
+            </label>
+          </h2>
+          <div id="pagelabels-settings" class="hidden">
+            <div class="settings-group">
+              <select id="pagelabels-preset" class="select-input">
+                <option value="roman-arabic">Roman + Arabic</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div id="pagelabels-simple">
+              <div class="settings-group">
+                <label class="settings-label">Body starts at page</label>
+                <input type="number" id="pagelabels-body-start" class="text-input" value="1" min="1" style="width:80px;">
+              </div>
+            </div>
+            <div id="pagelabels-custom" class="hidden">
+              <div id="pagelabels-ranges"></div>
+              <button id="btn-add-pagelabel" class="btn-small" style="margin-top:8px;">+ Add Range</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- TOC -->
+        <section class="card">
+          <h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toc-enabled">
+              <span class="toggle-track"></span>
+              <span>Table of Contents</span>
+            </label>
+          </h2>
+          <div id="toc-settings" class="hidden">
+            <div id="toc-entries"></div>
+            <div style="margin-top:8px; display:flex; gap:8px;">
+              <button id="btn-add-toc" class="btn-small">+ Add Entry</button>
+              <button id="btn-import-toc" class="btn-small">Import Text</button>
+            </div>
+            <div id="toc-import-area" class="hidden" style="margin-top:8px;">
+              <textarea id="toc-import-text" class="text-input" rows="5" placeholder="Chapter 1 ... 5&#10;  Section 1.1 ... 8"></textarea>
+              <button id="btn-parse-toc" class="btn-small" style="margin-top:4px;">Parse</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Action Buttons -->
+        <div class="action-row">
+          <button id="btn-start" class="btn btn-primary" disabled>Start OCR</button>
+          <button id="btn-cancel" class="btn btn-danger" disabled>Cancel</button>
         </div>
 
-        <div id="pagelabels-custom" class="hidden">
-          <div id="pagelabels-ranges"></div>
-          <button id="btn-add-pagelabel" class="btn-small" style="margin-top:8px;">+ Add Range</button>
+        <!-- Progress -->
+        <section id="progress-section" class="card hidden">
+          <h2>Progress</h2>
+          <div class="progress-bar-container">
+            <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+          </div>
+          <div id="progress-text" class="progress-text">Ready</div>
+        </section>
+
+        <!-- Log -->
+        <section class="card">
+          <h2>Log <button id="btn-clear-log" class="btn-small">Clear</button></h2>
+          <div id="log-output" class="log-output"></div>
+        </section>
+
+      </div><!-- /sidebar-scroll -->
+    </div><!-- /sidebar -->
+
+    <!-- ── Right Panel: Preview ── -->
+    <div class="preview-panel" id="preview-panel">
+      <div class="preview-empty" id="preview-empty">
+        <div class="preview-empty-icon">⎙</div>
+        <div class="preview-empty-text">Load a file to preview pages</div>
+      </div>
+
+      <div class="preview-content hidden" id="preview-content">
+        <!-- Page navigation -->
+        <div class="preview-nav">
+          <button class="btn-small" id="btn-prev-page">‹</button>
+          <span class="preview-page-info" id="preview-page-info">1 / 1</span>
+          <button class="btn-small" id="btn-next-page">›</button>
+        </div>
+
+        <!-- Image display with zone overlay -->
+        <div class="preview-image-wrapper" id="preview-image-wrapper">
+          <img id="preview-image" class="preview-image" alt="Page preview">
+          <canvas id="preview-overlay" class="preview-overlay"></canvas>
+        </div>
+
+        <!-- Preview toggles -->
+        <div class="preview-toggles">
+          <label class="toggle-switch compact">
+            <input type="checkbox" id="pv-show-zones" checked>
+            <span class="toggle-track"></span>
+            <span>Zones</span>
+          </label>
+          <label class="toggle-switch compact">
+            <input type="checkbox" id="pv-show-preprocess">
+            <span class="toggle-track"></span>
+            <span>Preprocessing</span>
+          </label>
         </div>
       </div>
-    </section>
+    </div><!-- /preview-panel -->
 
-    <!-- TOC Embedding -->
-    <section class="card">
-      <h2>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toc-enabled">
-          <span class="toggle-track"></span>
-          <span>Table of Contents</span>
-        </label>
-      </h2>
-      <div id="toc-settings" class="hidden">
-        <div id="toc-entries"></div>
-        <div style="margin-top:8px; display:flex; gap:8px;">
-          <button id="btn-add-toc" class="btn-small">+ Add Entry</button>
-          <button id="btn-import-toc" class="btn-small">Import from Text</button>
-        </div>
-        <div id="toc-import-area" class="hidden" style="margin-top:8px;">
-          <textarea id="toc-import-text" class="text-input" rows="6" placeholder="Paste TOC text, one entry per line:&#10;Chapter 1 ... 5&#10;  Section 1.1 ... 8&#10;Chapter 2 ... 15"></textarea>
-          <button id="btn-parse-toc" class="btn-small" style="margin-top:4px;">Parse</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Action Buttons -->
-    <div class="action-row">
-      <button id="btn-start" class="btn btn-primary" disabled>
-        Start OCR
-      </button>
-      <button id="btn-cancel" class="btn btn-danger" disabled>
-        Cancel
-      </button>
-    </div>
-
-    <!-- Progress -->
-    <section id="progress-section" class="card hidden">
-      <h2>Progress</h2>
-      <div class="progress-bar-container">
-        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
-      </div>
-      <div id="progress-text" class="progress-text">Ready</div>
-    </section>
-
-    <!-- Results Log -->
-    <section class="card">
-      <h2>
-        Log
-        <button id="btn-clear-log" class="btn-small">Clear</button>
-      </h2>
-      <div id="log-output" class="log-output"></div>
-    </section>
-  </div>
+  </div><!-- /app-layout -->
 
   <!-- Completion Modal -->
   <div id="modal-overlay" class="modal-overlay hidden">

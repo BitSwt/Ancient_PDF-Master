@@ -15,20 +15,17 @@ const tesseractStatus = document.getElementById("tesseract-status");
 const statusIcon = document.getElementById("status-icon");
 const statusMessage = document.getElementById("status-message");
 
-// Modal elements
 const modalOverlay = document.getElementById("modal-overlay");
 const modalMessage = document.getElementById("modal-message");
 const btnOpenFile = document.getElementById("btn-open-file");
 const btnShowFolder = document.getElementById("btn-show-folder");
 const btnModalClose = document.getElementById("btn-modal-close");
 
-// Language checkboxes
 const langGrc = document.getElementById("lang-grc");
 const langLat = document.getElementById("lang-lat");
 const langEng = document.getElementById("lang-eng");
 const dpiSelect = document.getElementById("dpi-select");
 
-// Split elements
 const splitEnabled = document.getElementById("split-enabled");
 const splitSettings = document.getElementById("split-settings");
 const splitPattern = document.getElementById("split-pattern");
@@ -39,7 +36,6 @@ const splitCommonPages = document.getElementById("split-common-pages");
 const splitOutputA = document.getElementById("split-output-a");
 const splitOutputB = document.getElementById("split-output-b");
 
-// Page labels elements
 const pagelabelsEnabled = document.getElementById("pagelabels-enabled");
 const pagelabelsSettings = document.getElementById("pagelabels-settings");
 const pagelabelsPreset = document.getElementById("pagelabels-preset");
@@ -49,7 +45,6 @@ const pagelabelsBodyStart = document.getElementById("pagelabels-body-start");
 const pagelabelsRanges = document.getElementById("pagelabels-ranges");
 const btnAddPagelabel = document.getElementById("btn-add-pagelabel");
 
-// TOC elements
 const tocEnabled = document.getElementById("toc-enabled");
 const tocSettings = document.getElementById("toc-settings");
 const tocEntries = document.getElementById("toc-entries");
@@ -59,7 +54,6 @@ const tocImportArea = document.getElementById("toc-import-area");
 const tocImportText = document.getElementById("toc-import-text");
 const btnParseToc = document.getElementById("btn-parse-toc");
 
-// Zone OCR elements
 const zonePreset = document.getElementById("zone-preset");
 const zoneHint = document.getElementById("zone-hint");
 const zoneParams = document.getElementById("zone-params");
@@ -69,8 +63,41 @@ const zoneMarginLabel = document.getElementById("zone-margin-label");
 const zoneCustomEntries = document.getElementById("zone-custom-entries");
 const btnAddZone = document.getElementById("btn-add-zone");
 
+// Preprocessing elements
+const preprocessEnabled = document.getElementById("preprocess-enabled");
+const preprocessSettings = document.getElementById("preprocess-settings");
+const ppDeskew = document.getElementById("pp-deskew");
+const ppAutocontrast = document.getElementById("pp-autocontrast");
+const ppDenoise = document.getElementById("pp-denoise");
+const ppGrayscale = document.getElementById("pp-grayscale");
+const ppBw = document.getElementById("pp-bw");
+const ppBwSettings = document.getElementById("pp-bw-settings");
+const ppBwThreshold = document.getElementById("pp-bw-threshold");
+const ppBwLabel = document.getElementById("pp-bw-label");
+
+// Preview elements
+const previewPanel = document.getElementById("preview-panel");
+const previewEmpty = document.getElementById("preview-empty");
+const previewContent = document.getElementById("preview-content");
+const previewImage = document.getElementById("preview-image");
+const previewOverlay = document.getElementById("preview-overlay");
+const previewPageInfo = document.getElementById("preview-page-info");
+const btnPrevPage = document.getElementById("btn-prev-page");
+const btnNextPage = document.getElementById("btn-next-page");
+const pvShowZones = document.getElementById("pv-show-zones");
+const pvShowPreprocess = document.getElementById("pv-show-preprocess");
+
+// Drop zone
+const dropZone = document.getElementById("drop-zone");
+const dropArea = document.getElementById("drop-area");
+
 let currentOutputPath = "";
 let removeProgressListener = null;
+
+// Preview state
+let previewPages = [];
+let currentPage = 0;
+let totalPages = 0;
 
 // ── Logging ──
 
@@ -92,14 +119,17 @@ function getBasePath(filePath) {
   return { dir, baseName };
 }
 
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 // ── Initialization ──
 
 async function init() {
-  // Show loading state while Python initializes (may auto-install packages)
   tesseractStatus.classList.remove("hidden");
   statusIcon.textContent = "⟳";
   statusMessage.textContent = "Starting Python backend...";
-  log("[INFO] Initializing Python backend (may install packages on first run)...", "info");
+  log("[INFO] Initializing (may install packages on first run)...", "info");
 
   try {
     const result = await window.api.checkTesseract();
@@ -110,18 +140,13 @@ async function init() {
       statusMessage.textContent = result.message;
       log(`[OK] ${result.message}`, "ok");
 
-      // Check installed language packs
       const langResult = await window.api.getLanguages();
       const installed = langResult.installed || [];
       const langNames = { grc: "Ancient Greek", lat: "Latin", eng: "English" };
 
-      for (const [code, checkbox] of Object.entries({
-        grc: langGrc,
-        lat: langLat,
-        eng: langEng,
-      })) {
+      for (const [code, checkbox] of Object.entries({ grc: langGrc, lat: langLat, eng: langEng })) {
         if (installed.includes(code)) {
-          log(`  [OK] ${langNames[code]} (${code}) installed`, "ok");
+          log(`  [OK] ${langNames[code]} (${code})`, "ok");
         } else {
           log(`  [WARN] ${langNames[code]} (${code}) not installed`, "warn");
           checkbox.checked = false;
@@ -138,13 +163,12 @@ async function init() {
   } catch (err) {
     tesseractStatus.className = "status-banner error";
     statusIcon.textContent = "✗";
-
     const msg = err.message || "Unknown error";
 
     if (msg.includes("Missing Python packages")) {
       statusMessage.textContent = "Python packages not installed";
       log("[ERROR] " + msg, "error");
-      log("[FIX] Run: ./scripts/run-dev.sh  (or ./scripts/install-mac.sh for full install)", "warn");
+      log("[FIX] Run: ./scripts/run-dev.sh", "warn");
     } else if (msg.includes("Failed to start") || msg.includes("ENOENT")) {
       statusMessage.textContent = "Python not found";
       log("[ERROR] " + msg, "error");
@@ -156,73 +180,272 @@ async function init() {
   }
 }
 
+// ── Drag & Drop ──
+
+function handleFileInput(filePath) {
+  inputPath.value = filePath;
+  btnStart.disabled = false;
+
+  const { dir, baseName } = getBasePath(filePath);
+  outputPath.value = `${dir}/${baseName}_ocr.pdf`;
+  splitOutputA.value = `${dir}/${baseName}_lang_a.pdf`;
+  splitOutputB.value = `${dir}/${baseName}_lang_b.pdf`;
+
+  log(`Input: ${filePath}`, "info");
+  loadPreview(filePath);
+}
+
+// Drag & drop on the drop area
+dropArea.addEventListener("click", () => btnBrowseInput.click());
+
+document.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropArea.classList.add("drag-over");
+});
+
+document.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!e.relatedTarget || !document.contains(e.relatedTarget)) {
+    dropArea.classList.remove("drag-over");
+  }
+});
+
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropArea.classList.remove("drag-over");
+
+  const files = Array.from(e.dataTransfer.files);
+  if (files.length > 0) {
+    const file = files[0];
+    const ext = file.name.split(".").pop().toLowerCase();
+    const supported = ["pdf", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"];
+    if (supported.includes(ext)) {
+      handleFileInput(file.path);
+    } else {
+      log(`[WARN] Unsupported file type: .${ext}`, "warn");
+    }
+  }
+});
+
 // ── File Selection ──
 
 btnBrowseInput.addEventListener("click", async () => {
   const filePath = await window.api.selectInputFile();
-  if (filePath) {
-    inputPath.value = filePath;
-    btnStart.disabled = false;
-
-    const { dir, baseName } = getBasePath(filePath);
-    outputPath.value = `${dir}/${baseName}_ocr.pdf`;
-    splitOutputA.value = `${dir}/${baseName}_lang_a.pdf`;
-    splitOutputB.value = `${dir}/${baseName}_lang_b.pdf`;
-
-    log(`Input: ${filePath}`, "info");
-  }
+  if (filePath) handleFileInput(filePath);
 });
 
 btnBrowseOutput.addEventListener("click", async () => {
   const filePath = await window.api.selectOutputFile(outputPath.value);
-  if (filePath) {
-    outputPath.value = filePath;
+  if (filePath) outputPath.value = filePath;
+});
+
+// ── Preview ──
+
+async function loadPreview(filePath) {
+  previewEmpty.classList.add("hidden");
+  previewContent.classList.remove("hidden");
+  previewPageInfo.textContent = "Loading...";
+
+  try {
+    const result = await window.api.loadPreview({ input: filePath, dpi: 72, max_width: 600 });
+    previewPages = result.pages;
+    totalPages = result.total;
+    currentPage = 0;
+    showPage(0);
+    log(`[OK] Loaded ${totalPages} page(s) for preview`, "ok");
+  } catch (err) {
+    log(`[WARN] Preview failed: ${err.message}`, "warn");
+    previewEmpty.classList.remove("hidden");
+    previewContent.classList.add("hidden");
   }
+}
+
+function showPage(index) {
+  if (index < 0 || index >= totalPages) return;
+  currentPage = index;
+  previewPageInfo.textContent = `${index + 1} / ${totalPages}`;
+
+  if (pvShowPreprocess.checked && preprocessEnabled.checked) {
+    loadPreprocessedPage(index);
+  } else {
+    const page = previewPages[index];
+    previewImage.src = page.data;
+    previewImage.onload = () => drawZoneOverlay();
+  }
+}
+
+async function loadPreprocessedPage(index) {
+  previewPageInfo.textContent = `${index + 1} / ${totalPages} (processing...)`;
+  try {
+    const result = await window.api.previewPreprocess({
+      input: inputPath.value,
+      page: index,
+      dpi: 150,
+      max_width: 600,
+      deskew: ppDeskew.checked,
+      grayscale: ppGrayscale.checked,
+      bw: ppBw.checked,
+      bw_threshold: parseInt(ppBwThreshold.value),
+      denoise: ppDenoise.checked,
+      autocontrast: ppAutocontrast.checked,
+    });
+    previewImage.src = result.data;
+    previewImage.onload = () => drawZoneOverlay();
+    previewPageInfo.textContent = `${index + 1} / ${totalPages}`;
+  } catch (err) {
+    log(`[WARN] Preprocess preview failed: ${err.message}`, "warn");
+    // Fallback to original
+    const page = previewPages[index];
+    if (page) previewImage.src = page.data;
+    previewPageInfo.textContent = `${index + 1} / ${totalPages}`;
+  }
+}
+
+function drawZoneOverlay() {
+  const canvas = previewOverlay;
+  const img = previewImage;
+
+  canvas.width = img.clientWidth;
+  canvas.height = img.clientHeight;
+  canvas.style.width = img.clientWidth + "px";
+  canvas.style.height = img.clientHeight + "px";
+
+  // Position overlay on top of image
+  const wrapper = document.getElementById("preview-image-wrapper");
+  const imgRect = img.getBoundingClientRect();
+  const wrapperRect = wrapper.getBoundingClientRect();
+  canvas.style.left = (imgRect.left - wrapperRect.left) + "px";
+  canvas.style.top = (imgRect.top - wrapperRect.top) + "px";
+
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!pvShowZones.checked) return;
+
+  const preset = zonePreset.value;
+  if (preset === "full_page") return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const colors = ["rgba(52, 208, 88, 0.2)", "rgba(88, 166, 255, 0.2)", "rgba(248, 81, 73, 0.2)"];
+  const borders = ["rgba(52, 208, 88, 0.6)", "rgba(88, 166, 255, 0.6)", "rgba(248, 81, 73, 0.6)"];
+
+  let zones = [];
+
+  if (preset === "left_margin") {
+    const mw = parseInt(zoneMarginWidth.value) / 100;
+    zones = [
+      { x: 0, y: 0, w: mw, h: 1, label: "Margin" },
+      { x: mw, y: 0, w: 1 - mw, h: 1, label: "Body" },
+    ];
+  } else if (preset === "both_margins") {
+    const mw = parseInt(zoneMarginWidth.value) / 100;
+    zones = [
+      { x: 0, y: 0, w: mw, h: 1, label: "L.Margin" },
+      { x: mw, y: 0, w: 1 - 2 * mw, h: 1, label: "Body" },
+      { x: 1 - mw, y: 0, w: mw, h: 1, label: "R.Margin" },
+    ];
+  } else if (preset === "custom") {
+    const rows = zoneCustomEntries.querySelectorAll(".zone-row");
+    rows.forEach((row) => {
+      zones.push({
+        x: parseInt(row.querySelector(".zr-x1").value) / 100,
+        y: parseInt(row.querySelector(".zr-y1").value) / 100,
+        w: (parseInt(row.querySelector(".zr-x2").value) - parseInt(row.querySelector(".zr-x1").value)) / 100,
+        h: (parseInt(row.querySelector(".zr-y2").value) - parseInt(row.querySelector(".zr-y1").value)) / 100,
+        label: `PSM ${row.querySelector(".zr-psm").value}`,
+      });
+    });
+  }
+
+  zones.forEach((zone, i) => {
+    const ci = i % colors.length;
+    ctx.fillStyle = colors[ci];
+    ctx.fillRect(zone.x * w, zone.y * h, zone.w * w, zone.h * h);
+    ctx.strokeStyle = borders[ci];
+    ctx.lineWidth = 2;
+    ctx.strokeRect(zone.x * w, zone.y * h, zone.w * w, zone.h * h);
+
+    // Label
+    ctx.fillStyle = borders[ci];
+    ctx.font = "11px -apple-system, sans-serif";
+    ctx.fillText(zone.label, zone.x * w + 4, zone.y * h + 14);
+  });
+}
+
+btnPrevPage.addEventListener("click", () => showPage(currentPage - 1));
+btnNextPage.addEventListener("click", () => showPage(currentPage + 1));
+
+pvShowZones.addEventListener("change", drawZoneOverlay);
+pvShowPreprocess.addEventListener("change", () => showPage(currentPage));
+
+// Redraw zones when zone settings change
+zonePreset.addEventListener("change", () => {
+  const val = zonePreset.value;
+  zoneHint.textContent = {
+    full_page: "Standard single-pass OCR.",
+    left_margin: "Left margin + body. For Loeb, OCT, Teubner editions.",
+    both_margins: "Left margin + body + right margin.",
+    custom: "Define custom zones. PSM 11 for margins, PSM 3 for body.",
+  }[val] || "";
+  zoneParams.classList.toggle("hidden", val === "full_page" || val === "custom");
+  zoneCustom.classList.toggle("hidden", val !== "custom");
+  drawZoneOverlay();
+});
+
+zoneMarginWidth.addEventListener("input", () => {
+  zoneMarginLabel.textContent = `${zoneMarginWidth.value}%`;
+  drawZoneOverlay();
 });
 
 // ── Toggle Sections ──
 
-splitEnabled.addEventListener("change", () => {
-  splitSettings.classList.toggle("hidden", !splitEnabled.checked);
+preprocessEnabled.addEventListener("change", () => {
+  preprocessSettings.classList.toggle("hidden", !preprocessEnabled.checked);
 });
 
-splitPattern.addEventListener("change", () => {
-  splitCustom.classList.toggle("hidden", splitPattern.value !== "custom");
+ppBw.addEventListener("change", () => {
+  ppBwSettings.classList.toggle("hidden", !ppBw.checked);
+  if (ppBw.checked) ppGrayscale.checked = false;
 });
 
-pagelabelsEnabled.addEventListener("change", () => {
-  pagelabelsSettings.classList.toggle("hidden", !pagelabelsEnabled.checked);
+ppGrayscale.addEventListener("change", () => {
+  if (ppGrayscale.checked) ppBw.checked = false;
+  ppBwSettings.classList.add("hidden");
 });
 
+ppBwThreshold.addEventListener("input", () => {
+  ppBwLabel.textContent = ppBwThreshold.value;
+});
+
+// Refresh preview on preprocess toggle changes
+[ppDeskew, ppAutocontrast, ppDenoise, ppGrayscale, ppBw].forEach((el) => {
+  el.addEventListener("change", () => {
+    if (pvShowPreprocess.checked && preprocessEnabled.checked && totalPages > 0) {
+      showPage(currentPage);
+    }
+  });
+});
+ppBwThreshold.addEventListener("change", () => {
+  if (pvShowPreprocess.checked && ppBw.checked && totalPages > 0) {
+    showPage(currentPage);
+  }
+});
+
+splitEnabled.addEventListener("change", () => splitSettings.classList.toggle("hidden", !splitEnabled.checked));
+splitPattern.addEventListener("change", () => splitCustom.classList.toggle("hidden", splitPattern.value !== "custom"));
+pagelabelsEnabled.addEventListener("change", () => pagelabelsSettings.classList.toggle("hidden", !pagelabelsEnabled.checked));
 pagelabelsPreset.addEventListener("change", () => {
   const isCustom = pagelabelsPreset.value === "custom";
   pagelabelsSimple.classList.toggle("hidden", isCustom);
   pagelabelsCustom.classList.toggle("hidden", !isCustom);
 });
+tocEnabled.addEventListener("change", () => tocSettings.classList.toggle("hidden", !tocEnabled.checked));
 
-tocEnabled.addEventListener("change", () => {
-  tocSettings.classList.toggle("hidden", !tocEnabled.checked);
-});
-
-// ── Zone OCR Settings ──
-
-const ZONE_HINTS = {
-  full_page: "Standard single-pass OCR. Works for clean prints without marginal annotations.",
-  left_margin: "Splits the page into left margin (sparse text mode for verse/section numbers) and body. Best for Loeb, OCT, Teubner editions.",
-  both_margins: "Three zones: left margin (line numbers) + body + right margin (apparatus references). For critical editions.",
-  custom: "Define custom zones manually. Use PSM 11 for margins, PSM 3 for body text.",
-};
-
-zonePreset.addEventListener("change", () => {
-  const val = zonePreset.value;
-  zoneHint.textContent = ZONE_HINTS[val] || "";
-  zoneParams.classList.toggle("hidden", val === "full_page" || val === "custom");
-  zoneCustom.classList.toggle("hidden", val !== "custom");
-});
-
-zoneMarginWidth.addEventListener("input", () => {
-  zoneMarginLabel.textContent = `${zoneMarginWidth.value}%`;
-});
+// ── Zone Custom Rows ──
 
 function addCustomZoneRow(xStart = 0, yStart = 0, xEnd = 100, yEnd = 100, psm = 3) {
   const row = document.createElement("div");
@@ -237,23 +460,35 @@ function addCustomZoneRow(xStart = 0, yStart = 0, xEnd = 100, yEnd = 100, psm = 
     <span>-</span>
     <input type="number" class="text-input zr-y2" value="${yEnd}" min="0" max="100">
     <select class="select-input zr-psm">
-      <option value="3" ${psm === 3 ? "selected" : ""}>PSM 3 (auto)</option>
-      <option value="11" ${psm === 11 ? "selected" : ""}>PSM 11 (sparse)</option>
-      <option value="6" ${psm === 6 ? "selected" : ""}>PSM 6 (block)</option>
-      <option value="4" ${psm === 4 ? "selected" : ""}>PSM 4 (column)</option>
+      <option value="3" ${psm === 3 ? "selected" : ""}>PSM 3</option>
+      <option value="11" ${psm === 11 ? "selected" : ""}>PSM 11</option>
+      <option value="6" ${psm === 6 ? "selected" : ""}>PSM 6</option>
+      <option value="4" ${psm === 4 ? "selected" : ""}>PSM 4</option>
     </select>
     <button class="zone-delete">&times;</button>
   `;
-  row.querySelector(".zone-delete").addEventListener("click", () => row.remove());
+  row.querySelector(".zone-delete").addEventListener("click", () => { row.remove(); drawZoneOverlay(); });
+  // Redraw on change
+  row.querySelectorAll("input, select").forEach((el) => el.addEventListener("change", drawZoneOverlay));
   zoneCustomEntries.appendChild(row);
+  drawZoneOverlay();
 }
 
 btnAddZone.addEventListener("click", () => addCustomZoneRow());
 
+// ── Language / Config Getters ──
+
+function getSelectedLanguages() {
+  const langs = [];
+  if (langGrc.checked) langs.push("grc");
+  if (langLat.checked) langs.push("lat");
+  if (langEng.checked) langs.push("eng");
+  return langs.length > 0 ? langs.join("+") : "eng";
+}
+
 function getZoneConfig() {
   const preset = zonePreset.value;
   if (preset === "full_page") return {};
-
   if (preset === "custom") {
     const rows = zoneCustomEntries.querySelectorAll(".zone-row");
     const zones = [];
@@ -269,61 +504,37 @@ function getZoneConfig() {
     });
     return { zone_preset: "custom", zones };
   }
-
-  // Preset with adjustable margin width
   const marginWidth = parseInt(zoneMarginWidth.value) / 100;
   const zoneParamsObj = {};
-
-  if (preset === "left_margin") {
-    zoneParamsObj.margin_width = marginWidth;
-  } else if (preset === "both_margins") {
-    zoneParamsObj.left_margin = marginWidth;
-    zoneParamsObj.right_margin = marginWidth;
-  }
-
+  if (preset === "left_margin") zoneParamsObj.margin_width = marginWidth;
+  else if (preset === "both_margins") { zoneParamsObj.left_margin = marginWidth; zoneParamsObj.right_margin = marginWidth; }
   return { zone_preset: preset, zone_params: zoneParamsObj };
 }
 
-// ── Language Selection ──
-
-function getSelectedLanguages() {
-  const langs = [];
-  if (langGrc.checked) langs.push("grc");
-  if (langLat.checked) langs.push("lat");
-  if (langEng.checked) langs.push("eng");
-  return langs.length > 0 ? langs.join("+") : "eng";
+function getPreprocessConfig() {
+  if (!preprocessEnabled.checked) return null;
+  return {
+    deskew: ppDeskew.checked,
+    grayscale: ppGrayscale.checked,
+    bw: ppBw.checked,
+    bw_threshold: parseInt(ppBwThreshold.value),
+    denoise: ppDenoise.checked,
+    autocontrast: ppAutocontrast.checked,
+  };
 }
-
-// ── Page Labels ──
 
 function getPageLabels() {
   if (!pagelabelsEnabled.checked) return null;
-
   if (pagelabelsPreset.value === "roman-arabic") {
     const bodyStart = parseInt(pagelabelsBodyStart.value) || 1;
     const ranges = [{ start_page: 0, style: "roman_lower", start_number: 1 }];
-    if (bodyStart > 1) {
-      ranges.push({
-        start_page: bodyStart - 1,
-        style: "arabic",
-        start_number: 1,
-      });
-    }
+    if (bodyStart > 1) ranges.push({ start_page: bodyStart - 1, style: "arabic", start_number: 1 });
     return ranges;
   }
-
-  // Custom ranges
   const rows = pagelabelsRanges.querySelectorAll(".pagelabel-row");
   const ranges = [];
   rows.forEach((row) => {
-    const startPage = parseInt(row.querySelector(".pl-start").value) || 1;
-    const style = row.querySelector(".pl-style").value;
-    const startNum = parseInt(row.querySelector(".pl-startnum").value) || 1;
-    ranges.push({
-      start_page: startPage - 1,
-      style,
-      start_number: startNum,
-    });
+    ranges.push({ start_page: (parseInt(row.querySelector(".pl-start").value) || 1) - 1, style: row.querySelector(".pl-style").value, start_number: parseInt(row.querySelector(".pl-startnum").value) || 1 });
   });
   return ranges.length > 0 ? ranges : null;
 }
@@ -332,37 +543,33 @@ function addPageLabelRow(startPage = 1, style = "arabic", startNum = 1) {
   const row = document.createElement("div");
   row.className = "pagelabel-row";
   row.innerHTML = `
-    <span style="color:var(--text-secondary);font-size:12px;">Page</span>
-    <input type="number" class="text-input pl-start" value="${startPage}" min="1" style="width:60px;">
+    <span style="color:var(--text-secondary);font-size:11px;">Page</span>
+    <input type="number" class="text-input pl-start" value="${startPage}" min="1" style="width:50px;">
     <select class="select-input pl-style">
-      <option value="roman_lower" ${style === "roman_lower" ? "selected" : ""}>Roman (i,ii,iii)</option>
-      <option value="roman_upper" ${style === "roman_upper" ? "selected" : ""}>Roman (I,II,III)</option>
-      <option value="arabic" ${style === "arabic" ? "selected" : ""}>Arabic (1,2,3)</option>
+      <option value="roman_lower" ${style === "roman_lower" ? "selected" : ""}>i,ii,iii</option>
+      <option value="roman_upper" ${style === "roman_upper" ? "selected" : ""}>I,II,III</option>
+      <option value="arabic" ${style === "arabic" ? "selected" : ""}>1,2,3</option>
     </select>
-    <span style="color:var(--text-secondary);font-size:12px;">from</span>
-    <input type="number" class="text-input pl-startnum" value="${startNum}" min="1" style="width:50px;">
+    <span style="color:var(--text-secondary);font-size:11px;">from</span>
+    <input type="number" class="text-input pl-startnum" value="${startNum}" min="1" style="width:45px;">
     <button class="pagelabel-delete">&times;</button>
   `;
   row.querySelector(".pagelabel-delete").addEventListener("click", () => row.remove());
   pagelabelsRanges.appendChild(row);
 }
-
 btnAddPagelabel.addEventListener("click", () => addPageLabelRow());
 
 // ── TOC Editor ──
 
 function getTocEntries() {
   if (!tocEnabled.checked) return null;
-
   const rows = tocEntries.querySelectorAll(".toc-entry-row");
   const entries = [];
   rows.forEach((row) => {
     const title = row.querySelector(".toc-title").value.trim();
     const page = parseInt(row.querySelector(".toc-page").value) || 1;
     const level = parseInt(row.dataset.level) || 0;
-    if (title) {
-      entries.push({ title, page: page - 1, level });
-    }
+    if (title) entries.push({ title, page: page - 1, level });
   });
   return entries.length > 0 ? entries : null;
 }
@@ -371,66 +578,38 @@ function addTocEntry(title = "", page = 1, level = 0) {
   const row = document.createElement("div");
   row.className = "toc-entry-row";
   row.dataset.level = level;
-  row.style.paddingLeft = `${level * 20}px`;
+  row.style.paddingLeft = `${level * 16}px`;
   row.innerHTML = `
-    <button class="toc-indent-btn toc-outdent" title="Decrease indent">&lt;</button>
-    <button class="toc-indent-btn toc-indent" title="Increase indent">&gt;</button>
+    <button class="toc-indent-btn toc-outdent" title="Outdent">&lt;</button>
+    <button class="toc-indent-btn toc-indent" title="Indent">&gt;</button>
     <span class="toc-level-indicator">L${level}</span>
     <input type="text" class="text-input toc-title" placeholder="Title" value="${escapeHtml(title)}">
-    <input type="number" class="text-input toc-page" placeholder="Pg" value="${page}" min="1" style="width:60px;">
+    <input type="number" class="text-input toc-page" placeholder="Pg" value="${page}" min="1" style="width:50px;">
     <button class="toc-delete">&times;</button>
   `;
-
-  const updateLevel = (newLevel) => {
-    const clamped = Math.max(0, Math.min(3, newLevel));
-    row.dataset.level = clamped;
-    row.style.paddingLeft = `${clamped * 20}px`;
-    row.querySelector(".toc-level-indicator").textContent = `L${clamped}`;
-  };
-
-  row.querySelector(".toc-outdent").addEventListener("click", () => {
-    updateLevel(parseInt(row.dataset.level) - 1);
-  });
-  row.querySelector(".toc-indent").addEventListener("click", () => {
-    updateLevel(parseInt(row.dataset.level) + 1);
-  });
+  const updateLevel = (n) => { const c = Math.max(0, Math.min(3, n)); row.dataset.level = c; row.style.paddingLeft = `${c * 16}px`; row.querySelector(".toc-level-indicator").textContent = `L${c}`; };
+  row.querySelector(".toc-outdent").addEventListener("click", () => updateLevel(parseInt(row.dataset.level) - 1));
+  row.querySelector(".toc-indent").addEventListener("click", () => updateLevel(parseInt(row.dataset.level) + 1));
   row.querySelector(".toc-delete").addEventListener("click", () => row.remove());
-
   tocEntries.appendChild(row);
 }
 
-function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 btnAddToc.addEventListener("click", () => addTocEntry());
-
-btnImportToc.addEventListener("click", () => {
-  tocImportArea.classList.toggle("hidden");
-});
+btnImportToc.addEventListener("click", () => tocImportArea.classList.toggle("hidden"));
 
 btnParseToc.addEventListener("click", () => {
   const text = tocImportText.value;
   if (!text.trim()) return;
-
   const lines = text.split("\n");
   for (const line of lines) {
     if (!line.trim()) continue;
-
-    // Detect indent level by leading spaces/tabs
     const stripped = line.replace(/^\s+/, "");
     const indent = line.length - stripped.length;
     const level = Math.min(3, Math.floor(indent / 2));
-
-    // Try to parse "Title ... PageNum" or "Title\tPageNum"
     const match = stripped.match(/^(.+?)[\s.…·\-_]+(\d+)\s*$/) || stripped.match(/^(.+?)\t+(\d+)\s*$/);
-    if (match) {
-      addTocEntry(match[1].trim(), parseInt(match[2]), level);
-    } else {
-      addTocEntry(stripped.trim(), 1, level);
-    }
+    if (match) addTocEntry(match[1].trim(), parseInt(match[2]), level);
+    else addTocEntry(stripped.trim(), 1, level);
   }
-
   tocImportArea.classList.add("hidden");
   tocImportText.value = "";
   log(`[OK] Imported ${lines.filter((l) => l.trim()).length} TOC entries`, "ok");
@@ -441,19 +620,12 @@ btnParseToc.addEventListener("click", () => {
 function setupProgressListener() {
   removeProgressListener = window.api.onOcrProgress((data) => {
     if (data.current != null && data.total > 0) {
-      const pct = Math.round((data.current / data.total) * 100);
-      progressBar.style.width = `${pct}%`;
+      progressBar.style.width = `${Math.round((data.current / data.total) * 100)}%`;
     }
-    if (data.message) {
-      progressText.textContent = data.message;
-      log(data.message);
-    }
+    if (data.message) { progressText.textContent = data.message; log(data.message); }
     if (data.page_result) {
       const r = data.page_result;
-      log(
-        `  Page ${r.page}: ${r.words} words, confidence: ${r.confidence.toFixed(1)}%`,
-        "ok"
-      );
+      log(`  Page ${r.page}: ${r.words} words, confidence: ${r.confidence.toFixed(1)}%`, "ok");
     }
   });
 }
@@ -461,10 +633,7 @@ function setupProgressListener() {
 function cleanupProgress() {
   btnStart.disabled = false;
   btnCancel.disabled = true;
-  if (removeProgressListener) {
-    removeProgressListener();
-    removeProgressListener = null;
-  }
+  if (removeProgressListener) { removeProgressListener(); removeProgressListener = null; }
 }
 
 btnStart.addEventListener("click", async () => {
@@ -472,84 +641,55 @@ btnStart.addEventListener("click", async () => {
   if (!input) return;
 
   let output = outputPath.value;
-  if (!output) {
-    const { dir, baseName } = getBasePath(input);
-    output = `${dir}/${baseName}_ocr.pdf`;
-    outputPath.value = output;
-  }
+  if (!output) { const { dir, baseName } = getBasePath(input); output = `${dir}/${baseName}_ocr.pdf`; outputPath.value = output; }
 
   const lang = getSelectedLanguages();
   const dpi = parseInt(dpiSelect.value);
   const isSplit = splitEnabled.checked;
 
   log("", "");
-  log(`Starting OCR: lang=${lang}, dpi=${dpi}${isSplit ? " [bilingual split]" : ""}`, "info");
+  log(`Starting OCR: lang=${lang}, dpi=${dpi}${isSplit ? " [split]" : ""}`, "info");
 
-  // Update UI state
   btnStart.disabled = true;
   btnCancel.disabled = false;
   progressSection.classList.remove("hidden");
   progressBar.style.width = "0%";
-  progressText.textContent = "Loading file...";
-
+  progressText.textContent = "Loading...";
   setupProgressListener();
 
   try {
     if (isSplit) {
-      // Bilingual split mode
-      const langAPages =
-        splitPattern.value === "custom" ? splitLangAPages.value || "odd" : "odd";
-      const langBPages =
-        splitPattern.value === "custom" ? splitLangBPages.value || "even" : "even";
-      const commonPages = splitCommonPages.value || "";
+      const langAPages = splitPattern.value === "custom" ? splitLangAPages.value || "odd" : "odd";
+      const langBPages = splitPattern.value === "custom" ? splitLangBPages.value || "even" : "even";
       const outputA = splitOutputA.value || `${getBasePath(input).dir}/${getBasePath(input).baseName}_lang_a.pdf`;
       const outputB = splitOutputB.value || `${getBasePath(input).dir}/${getBasePath(input).baseName}_lang_b.pdf`;
 
-      log(`Output A: ${outputA}`, "info");
-      log(`Output B: ${outputB}`, "info");
-
       const result = await window.api.splitBilingual({
-        input,
-        output_a: outputA,
-        output_b: outputB,
-        lang,
-        dpi,
-        lang_a_pages: langAPages,
-        lang_b_pages: langBPages,
-        common_pages: commonPages,
+        input, output_a: outputA, output_b: outputB, lang, dpi,
+        lang_a_pages: langAPages, lang_b_pages: langBPages, common_pages: splitCommonPages.value || "",
       });
 
       progressBar.style.width = "100%";
       progressText.textContent = "Complete!";
-      log(`[DONE] Language A: ${result.output_a} (${result.pages_a} pages)`, "ok");
-      log(`[DONE] Language B: ${result.output_b} (${result.pages_b} pages)`, "ok");
-
+      log(`[DONE] A: ${result.output_a} (${result.pages_a} pages)`, "ok");
+      log(`[DONE] B: ${result.output_b} (${result.pages_b} pages)`, "ok");
       currentOutputPath = result.output_a;
       modalMessage.textContent = `A: ${result.output_a}\nB: ${result.output_b}`;
       modalOverlay.classList.remove("hidden");
     } else {
-      // Standard OCR mode
-      log(`Output: ${output}`, "info");
-
       const params = { input, output, lang, dpi };
-
-      // Add zone OCR config
-      const zoneConfig = getZoneConfig();
-      Object.assign(params, zoneConfig);
-
-      // Add page labels if enabled
+      Object.assign(params, getZoneConfig());
+      const preprocess = getPreprocessConfig();
+      if (preprocess) params.preprocess = preprocess;
       const pageLabels = getPageLabels();
       if (pageLabels) params.page_labels = pageLabels;
-
-      // Add TOC if enabled
       const toc = getTocEntries();
       if (toc) params.toc = toc;
 
       const result = await window.api.startOcr(params);
       progressBar.style.width = "100%";
       progressText.textContent = "Complete!";
-      log(`[DONE] Searchable PDF saved: ${result.output_path}`, "ok");
-
+      log(`[DONE] ${result.output_path}`, "ok");
       currentOutputPath = result.output_path;
       modalMessage.textContent = result.output_path;
       modalOverlay.classList.remove("hidden");
@@ -563,45 +703,23 @@ btnStart.addEventListener("click", async () => {
 });
 
 btnCancel.addEventListener("click", async () => {
-  try {
-    await window.api.cancelOcr();
-    log("[CANCELLED] OCR processing cancelled.", "warn");
-  } catch (err) {
-    log(`[ERROR] Cancel failed: ${err.message}`, "error");
-  }
+  try { await window.api.cancelOcr(); log("[CANCELLED]", "warn"); } catch (err) { log(`[ERROR] ${err.message}`, "error"); }
   cleanupProgress();
   progressText.textContent = "Cancelled";
 });
 
 // ── Modal ──
 
-btnOpenFile.addEventListener("click", () => {
-  window.api.openFile(currentOutputPath);
-  modalOverlay.classList.add("hidden");
-});
-
-btnShowFolder.addEventListener("click", () => {
-  window.api.showInFolder(currentOutputPath);
-  modalOverlay.classList.add("hidden");
-});
-
-btnModalClose.addEventListener("click", () => {
-  modalOverlay.classList.add("hidden");
-});
-
-modalOverlay.addEventListener("click", (e) => {
-  if (e.target === modalOverlay) {
-    modalOverlay.classList.add("hidden");
-  }
-});
+btnOpenFile.addEventListener("click", () => { window.api.openFile(currentOutputPath); modalOverlay.classList.add("hidden"); });
+btnShowFolder.addEventListener("click", () => { window.api.showInFolder(currentOutputPath); modalOverlay.classList.add("hidden"); });
+btnModalClose.addEventListener("click", () => modalOverlay.classList.add("hidden"));
+modalOverlay.addEventListener("click", (e) => { if (e.target === modalOverlay) modalOverlay.classList.add("hidden"); });
 
 // ── Clear Log ──
 
-btnClearLog.addEventListener("click", () => {
-  logOutput.innerHTML = "";
-});
+btnClearLog.addEventListener("click", () => { logOutput.innerHTML = ""; });
 
-// ── Auto-Updater UI ──
+// ── Auto-Updater ──
 
 const updateBanner = document.getElementById("update-banner");
 const updateMessage = document.getElementById("update-message");
@@ -615,53 +733,40 @@ window.api.onUpdaterStatus((data) => {
   switch (data.status) {
     case "available":
       updateBanner.classList.remove("hidden", "update-ready");
-      updateMessage.textContent = `Update available: v${data.version}`;
+      updateMessage.textContent = `Update: v${data.version}`;
       btnUpdateDownload.classList.remove("hidden");
       btnUpdateInstall.classList.add("hidden");
       updateProgressBar.classList.add("hidden");
-      log(`[UPDATE] New version available: v${data.version}`, "info");
       break;
-
     case "downloading":
-      updateMessage.textContent = `Downloading update: ${Math.round(data.percent)}%`;
+      updateMessage.textContent = `Downloading ${Math.round(data.percent)}%`;
       updateProgressBar.classList.remove("hidden");
       updateProgressFill.style.width = `${data.percent}%`;
       btnUpdateDownload.classList.add("hidden");
       break;
-
     case "ready":
       updateBanner.classList.add("update-ready");
-      updateMessage.textContent = `Update v${data.version} ready to install`;
+      updateMessage.textContent = `v${data.version} ready`;
       updateProgressBar.classList.add("hidden");
       btnUpdateDownload.classList.add("hidden");
       btnUpdateInstall.classList.remove("hidden");
-      log(`[UPDATE] v${data.version} downloaded and ready to install`, "ok");
       break;
-
     case "up-to-date":
-      // Don't show banner, just log
       log(`[OK] ${data.message}`, "ok");
       break;
-
     case "error":
       log(`[UPDATE] ${data.message}`, "warn");
       break;
   }
 });
 
-btnUpdateDownload.addEventListener("click", async () => {
-  btnUpdateDownload.disabled = true;
-  btnUpdateDownload.textContent = "Downloading...";
-  await window.api.updaterDownload();
-});
+btnUpdateDownload.addEventListener("click", async () => { btnUpdateDownload.disabled = true; btnUpdateDownload.textContent = "..."; await window.api.updaterDownload(); });
+btnUpdateInstall.addEventListener("click", async () => { await window.api.updaterInstall(); });
+btnUpdateDismiss.addEventListener("click", () => { updateBanner.classList.add("hidden"); });
 
-btnUpdateInstall.addEventListener("click", async () => {
-  await window.api.updaterInstall();
-});
+// ── Window resize → redraw overlay ──
 
-btnUpdateDismiss.addEventListener("click", () => {
-  updateBanner.classList.add("hidden");
-});
+window.addEventListener("resize", drawZoneOverlay);
 
 // ── Start ──
 
