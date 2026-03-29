@@ -54,6 +54,7 @@ const tocImportArea = document.getElementById("toc-import-area");
 const tocImportText = document.getElementById("toc-import-text");
 const btnParseToc = document.getElementById("btn-parse-toc");
 
+const autoDeskew = document.getElementById("auto-deskew");
 const confidenceRetry = document.getElementById("confidence-retry");
 const pageRangeInput = document.getElementById("page-range");
 const zonePreset = document.getElementById("zone-preset");
@@ -795,6 +796,7 @@ btnStart.addEventListener("click", async () => {
       modalOverlay.classList.remove("hidden");
     } else {
       const params = { input, output, lang, dpi };
+      if (autoDeskew.checked) params.auto_deskew = true;
       if (confidenceRetry.checked) params.min_confidence = 95.0;
       if (pageRangeInput.value.trim()) params.page_range = pageRangeInput.value.trim();
       Object.assign(params, getZoneConfig());

@@ -106,6 +106,7 @@ def handle_start_ocr(params: dict) -> dict:
     dpi = params.get("dpi", 300)
     min_confidence = params.get("min_confidence", 0)  # 0 = disabled
     page_range_str = params.get("page_range", "")
+    auto_deskew = params.get("auto_deskew", False)
 
     # Validate language packs before starting
     validate_languages(lang)
@@ -151,6 +152,17 @@ def handle_start_ocr(params: dict) -> dict:
         })
 
     total = len(images)
+
+    # Auto deskew (independent of preprocessing toggle)
+    if auto_deskew:
+        from .preprocess import _deskew
+        send_event("progress", {"current": 0, "total": total, "message": "Auto-deskewing pages..."})
+        for i in range(len(images)):
+            images[i] = _deskew(images[i])
+            send_event("progress", {
+                "current": i + 1, "total": total,
+                "message": f"Deskewed page {i + 1}/{total}",
+            })
 
     # Apply preprocessing if configured
     preprocess_cfg = params.get("preprocess")
