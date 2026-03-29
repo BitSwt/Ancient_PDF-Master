@@ -8,10 +8,10 @@ let pythonBridge;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 700,
-    minWidth: 700,
-    minHeight: 550,
+    width: 1100,
+    height: 750,
+    minWidth: 800,
+    minHeight: 600,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#111111",
@@ -111,6 +111,14 @@ ipcMain.handle("split-bilingual", async (_event, params) => {
   };
 
   return pythonBridge.send("split_bilingual", params, onProgress);
+});
+
+ipcMain.handle("load-preview", async (_event, params) => {
+  return pythonBridge.send("load_preview", params);
+});
+
+ipcMain.handle("preview-preprocess", async (_event, params) => {
+  return pythonBridge.send("preview_preprocess", params);
 });
 
 ipcMain.handle("open-file", async (_event, filePath) => {

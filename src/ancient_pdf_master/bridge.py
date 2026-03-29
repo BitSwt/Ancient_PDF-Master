@@ -66,7 +66,7 @@ def handle_get_languages(params: dict) -> dict:
 def handle_start_ocr(params: dict) -> dict:
     from .image_handler import load_images
     from .language import validate_languages
-    from .ocr_engine import ocr_page
+    from .ocr_engine import ocr_page, retry_low_confidence_words
     from .pdf_builder import build_searchable_pdf
     from .zone_ocr import ZONE_PRESETS, ZoneConfig, ZoneType, ocr_page_with_zones
 
@@ -74,6 +74,7 @@ def handle_start_ocr(params: dict) -> dict:
     output_path = params["output"]
     lang = params.get("lang", "grc+lat+eng")
     dpi = params.get("dpi", 300)
+    min_confidence = params.get("min_confidence", 0)  # 0 = disabled
 
     # Validate language packs before starting
     validate_languages(lang)
@@ -106,6 +107,21 @@ def handle_start_ocr(params: dict) -> dict:
     send_event("progress", {"current": 0, "total": 0, "message": "Loading file..."})
     images = load_images(input_path, dpi=dpi)
     total = len(images)
+
+    # Apply preprocessing if configured
+    preprocess_cfg = params.get("preprocess")
+    if preprocess_cfg:
+        from .preprocess import PreprocessConfig, preprocess_image
+        config = PreprocessConfig(
+            deskew=preprocess_cfg.get("deskew", False),
+            grayscale=preprocess_cfg.get("grayscale", False),
+            bw=preprocess_cfg.get("bw", False),
+            bw_threshold=preprocess_cfg.get("bw_threshold", 128),
+            denoise=preprocess_cfg.get("denoise", False),
+            autocontrast=preprocess_cfg.get("autocontrast", False),
+        )
+        send_event("progress", {"current": 0, "total": total, "message": "Preprocessing images..."})
+        images = [preprocess_image(img, config) for img in images]
 
     if total == 0:
         raise ValueError("No pages found in the input file.")
@@ -142,6 +158,35 @@ def handle_start_ocr(params: dict) -> dict:
 
     if _cancel_flag.is_set():
         raise ValueError("Processing cancelled.")
+
+    # Confidence retry pass
+    if min_confidence > 0:
+        send_event("progress", {
+            "current": 0,
+            "total": total,
+            "message": f"Retrying low-confidence words (< {min_confidence}%)...",
+        })
+        for i, (image, result) in enumerate(zip(images, ocr_results)):
+            if _cancel_flag.is_set():
+                raise ValueError("Processing cancelled.")
+
+            old_conf = result.page_confidence
+            improved = retry_low_confidence_words(
+                image, result, lang=lang, min_confidence=min_confidence,
+            )
+            ocr_results[i] = improved
+            new_conf = improved.page_confidence
+            improved_count = sum(
+                1 for old_w, new_w in zip(result.words, improved.words)
+                if new_w.confidence > old_w.confidence
+            )
+
+            send_event("progress", {
+                "current": i + 1,
+                "total": total,
+                "message": f"Retry page {i + 1}/{total}: {improved_count} words improved, "
+                           f"confidence {old_conf:.1f}% → {new_conf:.1f}%",
+            })
 
     # Parse optional page labels
     page_label_ranges = None
@@ -260,6 +305,93 @@ def handle_split_bilingual(params: dict) -> dict:
         "pages_b": len(set(lang_b_pages) | set(common_pages)),
     }
 
+def handle_load_preview(params: dict) -> dict:
+    """Load file and return page thumbnails as base64."""
+    import base64
+    import io
+
+    from .image_handler import load_images
+
+    input_path = params["input"]
+    dpi = params.get("dpi", 72)  # low DPI for thumbnails
+    max_width = params.get("max_width", 600)
+
+    images = load_images(input_path, dpi=dpi)
+    pages = []
+
+    for i, img in enumerate(images):
+        # Resize for preview
+        ratio = max_width / img.width
+        if ratio < 1:
+            new_h = int(img.height * ratio)
+            thumb = img.resize((max_width, new_h))
+        else:
+            thumb = img
+
+        buf = io.BytesIO()
+        thumb.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        pages.append({
+            "index": i,
+            "width": thumb.width,
+            "height": thumb.height,
+            "data": f"data:image/png;base64,{b64}",
+        })
+
+    return {"pages": pages, "total": len(pages)}
+
+
+def handle_preview_preprocess(params: dict) -> dict:
+    """Apply preprocessing to a single page and return the result."""
+    import base64
+    import io
+
+    from .image_handler import load_images
+    from .preprocess import PreprocessConfig, preprocess_image
+
+    input_path = params["input"]
+    page_index = params.get("page", 0)
+    dpi = params.get("dpi", 150)
+    max_width = params.get("max_width", 600)
+
+    images = load_images(input_path, dpi=dpi)
+    if page_index >= len(images):
+        raise ValueError(f"Page {page_index} out of range (total {len(images)})")
+
+    img = images[page_index]
+
+    # Apply preprocessing
+    config = PreprocessConfig(
+        deskew=params.get("deskew", False),
+        grayscale=params.get("grayscale", False),
+        bw=params.get("bw", False),
+        bw_threshold=params.get("bw_threshold", 128),
+        denoise=params.get("denoise", False),
+        autocontrast=params.get("autocontrast", False),
+    )
+    img = preprocess_image(img, config)
+
+    # Convert 1-bit images back for PNG encoding
+    if img.mode == "1":
+        img = img.convert("L")
+
+    # Resize for preview
+    ratio = max_width / img.width
+    if ratio < 1:
+        new_h = int(img.height * ratio)
+        img = img.resize((max_width, new_h))
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    return {
+        "page": page_index,
+        "width": img.width,
+        "height": img.height,
+        "data": f"data:image/png;base64,{b64}",
+    }
+
 
 # ── Dispatcher ──
 
@@ -269,6 +401,8 @@ HANDLERS = {
     "start_ocr": handle_start_ocr,
     "cancel_ocr": handle_cancel_ocr,
     "split_bilingual": handle_split_bilingual,
+    "load_preview": handle_load_preview,
+    "preview_preprocess": handle_preview_preprocess,
 }
 
 

@@ -105,60 +105,59 @@ def build_searchable_pdf(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Build the final PDF using pikepdf
-    output_pdf = pikepdf.Pdf.new()
+    # Build the final PDF using pikepdf.
+    # Strategy: create a combined reportlab PDF (image + text per page),
+    # then open it with pikepdf for post-processing.
+    combined_buf = io.BytesIO()
+    page_sizes = []
 
     for i, (image, ocr_result) in enumerate(zip(images, ocr_results)):
-        # Create image layer
-        image_pdf_bytes = _create_image_pdf_page(image, dpi)
+        page_w = _pixels_to_points(image.width, dpi)
+        page_h = _pixels_to_points(image.height, dpi)
+        page_sizes.append((page_w, page_h))
 
-        # Create text layer
-        text_pdf_bytes = _create_text_layer_pdf(ocr_result, dpi)
+    # Build all pages in a single reportlab canvas
+    c = canvas.Canvas(combined_buf)
 
-        # Open both as pikepdf objects
-        image_pdf = pikepdf.Pdf.open(io.BytesIO(image_pdf_bytes))
-        text_pdf = pikepdf.Pdf.open(io.BytesIO(text_pdf_bytes))
+    for i, (image, ocr_result) in enumerate(zip(images, ocr_results)):
+        page_w, page_h = page_sizes[i]
+        c.setPageSize((page_w, page_h))
 
-        # Get the image page and overlay text layer
-        image_page = image_pdf.pages[0]
-        text_page = text_pdf.pages[0]
+        # Draw image
+        img_buf = io.BytesIO()
+        # Ensure RGB mode for reportlab
+        save_img = image.convert("RGB") if image.mode not in ("RGB", "L") else image
+        save_img.save(img_buf, format="PNG")
+        img_buf.seek(0)
 
-        # Merge text layer content stream into image page
-        image_page_content = image_page.Contents
-        text_page_content = text_page.Contents
+        from reportlab.lib.utils import ImageReader
+        c.drawImage(ImageReader(img_buf), 0, 0, width=page_w, height=page_h)
 
-        # Add text layer resources to image page
-        if "/Font" in text_page.get("/Resources", {}):
-            if "/Resources" not in image_page:
-                image_page["/Resources"] = pikepdf.Dictionary()
-            if "/Font" not in image_page["/Resources"]:
-                image_page["/Resources"]["/Font"] = pikepdf.Dictionary()
+        # Draw invisible text layer on top
+        c.setFont("Helvetica", 12)
+        for word in ocr_result.words:
+            x_pt = _pixels_to_points(word.x, dpi)
+            y_pt = page_h - _pixels_to_points(word.y + word.height, dpi)
+            h_pt = _pixels_to_points(word.height, dpi)
 
-            for font_name, font_ref in text_page["/Resources"]["/Font"].items():
-                copied = output_pdf.copy_foreign(font_ref)
-                image_page["/Resources"]["/Font"][font_name] = copied
+            font_size = max(h_pt * 0.85, 4)
+            c.setFont("Helvetica", font_size)
 
-        # Append text content stream to image page
-        if isinstance(image_page_content, pikepdf.Array):
-            streams = list(image_page_content)
-        else:
-            streams = [image_page_content]
+            text_obj = c.beginText(x_pt, y_pt)
+            text_obj.setTextRenderMode(3)  # invisible
+            text_obj.textLine(word.text)
+            c.drawText(text_obj)
 
-        if isinstance(text_page_content, pikepdf.Array):
-            for s in text_page_content:
-                copied = output_pdf.copy_foreign(s)
-                streams.append(copied)
-        else:
-            copied = output_pdf.copy_foreign(text_page_content)
-            streams.append(copied)
-
-        image_page.Contents = pikepdf.Array(streams)
-
-        # Copy merged page to output
-        output_pdf.pages.append(output_pdf.copy_foreign(image_page))
+        c.showPage()
 
         if progress_callback:
             progress_callback(i + 1, len(images))
+
+    c.save()
+
+    # Open with pikepdf for post-processing (page labels, TOC)
+    combined_buf.seek(0)
+    output_pdf = pikepdf.Pdf.open(combined_buf)
 
     # Apply page labels (Roman numerals, Arabic, etc.)
     if page_label_ranges:
