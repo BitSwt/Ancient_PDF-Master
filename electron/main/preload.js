@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld("api", {
   // Get file path from dropped File object (Electron 33+)
   getPathForFile: (file) => webUtils.getPathForFile(file),
 
+  // Setup
+  getSetupStatus: () => ipcRenderer.invoke("get-setup-status"),
+
   // Tesseract
   checkTesseract: () => ipcRenderer.invoke("check-tesseract"),
   getLanguages: () => ipcRenderer.invoke("get-languages"),

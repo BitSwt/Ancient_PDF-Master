@@ -130,6 +130,11 @@ ipcMain.handle("detect-toc", async (_event, params) => {
   return pythonBridge.send("detect_toc", params);
 });
 
+ipcMain.handle("get-setup-status", async () => {
+  if (!pythonBridge) return { message: "Initializing..." };
+  return { message: pythonBridge._setupMessage || null };
+});
+
 ipcMain.handle("open-file", async (_event, filePath) => {
   shell.openPath(filePath);
 });
