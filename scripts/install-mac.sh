@@ -137,6 +137,20 @@ echo ""
 
 # \u2500\u2500 4. Build .app bundle \u2500\u2500
 echo "[4/6] Building .app bundle..."
+
+# Clean previous build artifacts to prevent stale .app from being picked up
+if [ -d "dist" ]; then
+  echo "  Cleaning previous build artifacts..."
+  rm -rf dist
+fi
+
+# Clear electron-updater cache to prevent auto-updater from rolling back
+UPDATER_CACHE="$HOME/Library/Caches/ancient-pdf-master-updater"
+if [ -d "$UPDATER_CACHE" ]; then
+  echo "  Clearing auto-updater cache..."
+  rm -rf "$UPDATER_CACHE"
+fi
+
 # Use 'dir' target with explicit publish config so app-update.yml is generated
 if ! npx electron-builder --mac dir --config.mac.identity=null --config.mac.target=dir 2>&1 | tail -5; then
   echo ""
