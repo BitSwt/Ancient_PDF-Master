@@ -1,6 +1,6 @@
 {
   "name": "ancient-pdf-master",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "OCR tool for Ancient Greek, Latin, and English texts with searchable PDF output",
   "main": "electron/main/index.js",
   "scripts": {
